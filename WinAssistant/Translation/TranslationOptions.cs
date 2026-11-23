@@ -22,6 +22,8 @@ public sealed class TranslationOptions
     public bool SystemAudio { get; set; } = true;
     [System.Text.Json.Serialization.JsonIgnore]
     public bool TranscribeOnly { get; set; }
+    internal bool TwoWay { get; set; }
+    public bool RecordAudio { get; set; } = true;
     public bool ShowSource { get; set; } = true;
     public int SourceFontSize { get; set; } = 13;
     public int TargetFontSize { get; set; } = 19;
@@ -55,7 +57,8 @@ public sealed class TranslationOptions
         return AvailableSourceLanguages.Where(id => Languages.Any(language => language.Id == id) &&
             (!limitToHubs || id is "Chinese" or "English")).ToArray();
     }
-    internal string SelectedSourceLanguage => SelectLanguage(SourceLanguage, AvailableSourceLanguages);
+    internal bool CanTranslateTwoWay => SelectedTranslationModel.Length != 0 && ModelForSource("auto") is not null;
+    internal string SelectedSourceLanguage => TwoWay ? "auto" : SelectLanguage(SourceLanguage, AvailableSourceLanguages);
     internal string SelectedTargetLanguage => SelectLanguage(TargetLanguage, AvailableTargetLanguages, "English");
 
     internal string PathFor(StreamingSpeechModel model) => model.Download.ResolvePath(

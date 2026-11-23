@@ -12,6 +12,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     @Published private(set) var listening = false
     @Published private(set) var recording = false
     @Published private(set) var sourceOnlySession = false
+    @Published private(set) var twoWaySession = false
     @Published private(set) var identifiesSpeakers = false
     @Published private(set) var savedRecording: URL?
     @Published private(set) var status = ""
@@ -22,6 +23,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     private var window: NSWindow?
     private var job: Task<Void, Never>?
     private var engine: TranslationEngine?
+    private var clearedThroughCaption = 0
 
     func show() {
         if window?.isVisible != true && !running {
@@ -84,12 +86,15 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         targetLanguage = previousSource
     }
 
-    func toggle(record: Bool = false) {
+    func toggle(twoWay: Bool = false) {
         guard job == nil else { stop(); return }
         var options = SettingsManager.shared.translationOptions
+        let record = options.recordAudio
         options.sourceLanguage = sourceLanguage
         options.targetLanguage = targetLanguage
         options.transcribeOnly = transcribeOnly
+        options.twoWay = twoWay
+        twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
         identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
@@ -98,6 +103,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         recording = record
         savedRecording = nil
         failed = false
+        clearedThroughCaption = 0
         captions = []
         speakerNames = [:]
         status = t("正在加载模型…", "Loading models…")
@@ -108,6 +114,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                 running = false
                 listening = false
                 recording = false
+                twoWaySession = false
                 if savedRecording != nil && !failed { status = t("录音已保存", "Recording saved") }
                 if sourceOnlySession && Task.isCancelled {
                     for index in captions.indices where !captions[index].sourceFinal {
@@ -122,12 +129,18 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             do {
                 try await engine.run(options: options, status: { backend in
                     self.listening = true
-                    let label = record ? self.t("正在录音", "Recording") :
-                        self.sourceOnlySession ? self.t("正在记录原文", "Transcribing") : self.t("正在监听", "Listening")
+                    let label: String
+                    if twoWay {
+                        label = record ? self.t("互译并录音", "Two-way + recording") : self.t("正在互译", "Translating both ways")
+                    } else {
+                        label = record ? self.t("正在录音", "Recording") :
+                            self.sourceOnlySession ? self.t("正在记录原文", "Transcribing") : self.t("正在监听", "Listening")
+                    }
                     self.status = backend.map { label + " · " + $0 } ?? label
                 }, caption: { item in
-                    if item.id > self.captions.count { self.captions.append(item) }
-                    else { self.captions[item.id - 1] = item }
+                    let index = item.id - self.clearedThroughCaption - 1
+                    if index == self.captions.count { self.captions.append(item) }
+                    else if self.captions.indices.contains(index) { self.captions[index] = item }
                 }, recordingSaved: onSaved)
                 status = t("已停止", "Stopped")
             } catch {
@@ -139,6 +152,12 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                 }
             }
         }
+    }
+
+    func clearTranscript() {
+        guard let last = captions.last else { return }
+        clearedThroughCaption = last.id
+        captions.removeAll()
     }
 
     func speakerName(_ id: Int) -> String {
@@ -224,6 +243,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 private struct TranslationWindowView: View {
     @ObservedObject var controller: TranslationWindowController
     @EnvironmentObject private var settings: SettingsManager
+    @State private var confirmingClear = false
 
     private enum AudioSource: Hashable {
         case none, system, microphone, both
@@ -247,6 +267,13 @@ private struct TranslationWindowView: View {
 
     private var dark: Bool { settings.theme == "Dark" }
     private let accent = Color(red: 0.14, green: 0.42, blue: 0.996)
+    private let stopAccent = Color(red: 0.70, green: 0.24, blue: 0.30)
+    private var twoWayAccent: Color {
+        dark ? Color(red: 0.80, green: 0.71, blue: 1) : Color(red: 0.37, green: 0.24, blue: 0.68)
+    }
+    private var canStartTwoWay: Bool {
+        !controller.running && !controller.transcribeOnly && settings.translationOptions.canTranslateTwoWay
+    }
     private var line: Color {
         dark ? Color(red: 0.20, green: 0.25, blue: 0.35) : Color(red: 0.85, green: 0.88, blue: 0.93)
     }
@@ -286,7 +313,13 @@ private struct TranslationWindowView: View {
                 .accessibilityLabel(t("录写/翻译设置", "Transcribe / Translate settings"))
                 .help(t("录写/翻译设置", "Transcribe / Translate settings"))
                 Spacer(minLength: 0)
-
+                Button {
+                    confirmingClear = true
+                } label: {
+                    Label(t("清屏", "Clear"), systemImage: "trash")
+                }
+                .help(t("清空当前字幕", "Clear current captions"))
+                .disabled(controller.captions.isEmpty)
             }
 
             ScrollViewReader { reader in
@@ -316,7 +349,34 @@ private struct TranslationWindowView: View {
                 }
             }
 
-            HStack(spacing: 8) {
+            footer
+        }
+        .padding(12)
+        .frame(minWidth: 670, minHeight: 270)
+        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 0.965, green: 0.973, blue: 0.988))
+        .preferredColorScheme(dark ? .dark : .light)
+        .sheet(isPresented: $confirmingClear) { clearConfirmation }
+        .onChange(of: settings.translationOptions.availableSourceLanguages) { available in
+            if !controller.running {
+                controller.sourceLanguage = TranslationOptions.selectLanguage(controller.sourceLanguage, from: available)
+            }
+        }
+        .onChange(of: settings.translationOptions.targetLanguages(for: controller.sourceLanguage)) { available in
+            if !controller.running {
+                controller.targetLanguage = TranslationOptions.selectLanguage(controller.targetLanguage, from: available, fallback: "English")
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            if controller.twoWaySession {
+                Text(t("中文 ⇄ 英语", "Chinese ⇄ English"))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(twoWayAccent)
+                    .padding(.leading, 8)
+                    .frame(width: 254, alignment: .leading)
+            } else {
                 HStack(spacing: 6) {
                     Picker(t("源语言", "Source language"), selection: $controller.sourceLanguage) {
                         translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
@@ -338,48 +398,94 @@ private struct TranslationWindowView: View {
                     .disabled(controller.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
                 }
                 .disabled(controller.running)
-                Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
-                    .help(t("仅记录原文字幕", "Record source captions only"))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .disabled(controller.running)
-                Button(controller.running ? t("停止", "Stop") : t("开始", "Start")) { controller.toggle() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    .padding(.leading, 4)
-                Button(controller.recording ? t("录音已开启", "Recording enabled") : t("开始并录音", "Start and record")) {
-                    controller.toggle(record: true)
-                }
+            }
+            Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
+                .help(t("仅记录原文字幕", "Record source captions only"))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
                 .disabled(controller.running)
-                Spacer(minLength: 8)
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(controller.failed || (controller.listening && controller.recording) ? Color.red
-                              : controller.listening ? Color.green : Color.secondary)
-                        .frame(width: 8, height: 8)
-                    Text(controller.status.isEmpty ? t("就绪", "Ready") : controller.status)
+            Toggle(t("录音", "Record"), isOn: settings.translationBinding(\.recordAudio))
+                .help(t("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads"))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .fixedSize()
+                .disabled(controller.running)
+            Button(controller.running ? t("停止", "Stop") : t("开始", "Start")) { controller.toggle() }
+                .buttonStyle(.borderedProminent)
+                .tint(controller.running ? stopAccent : accent)
+                .padding(.leading, 4)
+            Button {
+                controller.toggle(twoWay: true)
+            } label: {
+                Text(controller.twoWaySession ? t("互译中", "Two-way active") : t("互译", "Two-way"))
+                    .fontWeight(.semibold)
+                    .foregroundStyle(twoWayAccent)
+                    .padding(.horizontal, 9)
+                    .frame(minHeight: 24)
+                    .background(twoWayAccent.opacity(controller.twoWaySession ? 0.22 : 0.10),
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(twoWayAccent.opacity(0.25)))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canStartTwoWay)
+            .opacity(canStartTwoWay || controller.twoWaySession ? 1 : 0.52)
+            .help(twoWayHelp)
+            Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(controller.failed || (controller.listening && controller.recording) ? Color.red
+                          : controller.listening ? Color.green : Color.secondary)
+                    .frame(width: 8, height: 8)
+                Text(controller.status.isEmpty ? t("就绪", "Ready") : controller.status)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .help(controller.savedRecording?.path ?? controller.status)
+            .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
+        }
+    }
+
+    private var twoWayHelp: String {
+        if controller.transcribeOnly { return t("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation") }
+        if !settings.translationOptions.canTranslateTwoWay {
+            return t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
+        }
+        return t("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
+    }
+
+    private var clearConfirmation: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "trash")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(stopAccent)
+                    .frame(width: 40, height: 40)
+                    .background(stopAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("清空当前字幕？", "Clear current captions?"))
+                        .font(.headline)
+                    Text(t("已显示的原文和译文将从窗口和后续导出中移除。录音和已保存的文件会保留。",
+                           "Visible captions and translations will be removed from the window and future exports. Audio recordings and saved files are kept."))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .help(controller.savedRecording?.path ?? controller.status)
-                .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
+            }
+            HStack(spacing: 8) {
+                Spacer()
+                Button(t("取消", "Cancel")) { confirmingClear = false }
+                    .keyboardShortcut(.cancelAction)
+                Button(t("清空字幕", "Clear captions"), role: .destructive) {
+                    controller.clearTranscript()
+                    confirmingClear = false
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(stopAccent)
             }
         }
-        .padding(12)
-        .frame(minWidth: 670, minHeight: 270)
-        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 0.965, green: 0.973, blue: 0.988))
-        .preferredColorScheme(dark ? .dark : .light)
-        .onChange(of: settings.translationOptions.availableSourceLanguages) { available in
-            if !controller.running {
-                controller.sourceLanguage = TranslationOptions.selectLanguage(controller.sourceLanguage, from: available)
-            }
-        }
-        .onChange(of: settings.translationOptions.targetLanguages(for: controller.sourceLanguage)) { available in
-            if !controller.running {
-                controller.targetLanguage = TranslationOptions.selectLanguage(controller.targetLanguage, from: available, fallback: "English")
-            }
-        }
+        .padding(20)
+        .frame(width: 420)
     }
 
     private var exportMenu: some View {

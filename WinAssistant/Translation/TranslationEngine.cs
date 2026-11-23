@@ -56,7 +56,7 @@ internal sealed class TranslationEngine
         var key = Guid.NewGuid().ToString("N");
         using var http = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false });
         var llamaStartup = StartTranslation();
-        string target = options.SelectedTargetLanguage;
+        string selectedTarget = options.SelectedTargetLanguage;
         string sourceLanguage = options.SelectedSourceLanguage;
         try
         {
@@ -107,6 +107,13 @@ internal sealed class TranslationEngine
         async Task<string> TranslateText(string source, bool provisional, Action<string> preview, CancellationToken cancellation)
         {
             string inputLanguage = sourceLanguage;
+            string target = selectedTarget;
+            if (options.TwoWay)
+            {
+                var detected = ChineseEnglishSource.Detect(source, provisional);
+                if (detected is null) return provisional ? "" : source;
+                (inputLanguage, target) = detected.Value;
+            }
             string instruction = $"Translate the following text into {target}.\n\n{source}";
             if (options.UseLmtTranslation)
             {

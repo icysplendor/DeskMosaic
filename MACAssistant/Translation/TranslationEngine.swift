@@ -21,6 +21,8 @@ struct TranslationOptions: Codable, Equatable {
     var microphone = false
     var systemAudio = true
     var transcribeOnly = false
+    var twoWay = false
+    var recordAudio = true
     var showSource = true
     var sourceFontSize = 13
     var targetFontSize = 19
@@ -28,7 +30,7 @@ struct TranslationOptions: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case streamingModel, additionalStreamingModels, translationModel, onlineSpeakerModel, llamaServer, compute, sourceLanguage, targetLanguage
         case lmtTranslationModel, useLmtTranslation, correctionModel, enableCorrection, diagnosticsEnabled
-        case microphone, microphoneFilter, microphonePause, systemAudio, showSource, sourceFontSize, targetFontSize
+        case microphone, microphoneFilter, microphonePause, systemAudio, recordAudio, showSource, sourceFontSize, targetFontSize
     }
 
     init() {}
@@ -53,6 +55,7 @@ struct TranslationOptions: Codable, Equatable {
         microphonePause = try fields.decodeIfPresent(String.self, forKey: .microphonePause) ?? microphonePause
         microphone = try fields.decodeIfPresent(Bool.self, forKey: .microphone) ?? microphone
         systemAudio = try fields.decodeIfPresent(Bool.self, forKey: .systemAudio) ?? systemAudio
+        recordAudio = try fields.decodeIfPresent(Bool.self, forKey: .recordAudio) ?? recordAudio
         showSource = try fields.decodeIfPresent(Bool.self, forKey: .showSource) ?? showSource
         let sourceSize = try fields.decodeIfPresent(Int.self, forKey: .sourceFontSize) ?? sourceFontSize
         let targetSize = try fields.decodeIfPresent(Int.self, forKey: .targetFontSize) ?? targetFontSize
@@ -91,7 +94,8 @@ struct TranslationOptions: Codable, Equatable {
             Self.languages.contains { $0.id == id } && (!limitToHubs || hubs.contains(id))
         }
     }
-    var selectedSourceLanguage: String { Self.selectLanguage(sourceLanguage, from: availableSourceLanguages) }
+    var canTranslateTwoWay: Bool { !selectedTranslationModel.isEmpty && modelForSource("auto") != nil }
+    var selectedSourceLanguage: String { twoWay ? "auto" : Self.selectLanguage(sourceLanguage, from: availableSourceLanguages) }
     var selectedTargetLanguage: String { Self.selectLanguage(targetLanguage, from: availableTargetLanguages, fallback: "English") }
 
     func path(for model: StreamingSpeechModel) -> String {
@@ -114,6 +118,41 @@ struct TranslationOptions: Codable, Equatable {
 
     static let llamaModelURL = URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf")!
     static let llamaRelease = URL(string: "https://github.com/ggml-org/llama.cpp/releases")!
+}
+
+enum ChineseEnglishSource: String {
+    case chinese = "Chinese", english = "English"
+
+    var target: String { self == .chinese ? Self.english.rawValue : Self.chinese.rawValue }
+
+    static func detect(_ text: String, provisional: Bool) -> Self? {
+        var chinese = 0, english = 0
+        var first: Self?
+        var inEnglishWord = false
+        // Count one vote per Han character or English word, with contractions
+        // counted as one word. Digits and punctuation are neutral.
+        for scalar in text.unicodeScalars {
+            let code = scalar.value
+            if (0x3400...0x4DBF).contains(code) || (0x4E00...0x9FFF).contains(code) ||
+                (0xF900...0xFAFF).contains(code) || (0x20000...0x323AF).contains(code) {
+                chinese += 1
+                if first == nil { first = .chinese }
+                inEnglishWord = false
+            } else if (65...90).contains(code) || (97...122).contains(code) {
+                if !inEnglishWord { english += 1 }
+                if first == nil { first = .english }
+                inEnglishWord = true
+            } else if code != 0x27 && code != 0x2019 {
+                inEnglishWord = false
+            }
+        }
+        let total = chinese + english
+        if provisional && (total < 4 || abs(chinese - english) < 2 || max(chinese, english) * 5 < total * 3) {
+            return nil
+        }
+        if chinese == english { return first }
+        return chinese > english ? .chinese : .english
+    }
 }
 
 struct TranslationModelDownload: Sendable {
@@ -372,7 +411,7 @@ final class TranslationEngine {
         }
         defer { llamaStartup.cancel() }
 
-        let target = options.selectedTargetLanguage
+        let selectedTarget = options.selectedTargetLanguage
         let sourceLanguage = options.selectedSourceLanguage
         try await runRecognition(translationReady: {
             let server = try await llamaStartup.value
@@ -394,6 +433,14 @@ final class TranslationEngine {
 
         func translateText(_ source: String, _ provisional: Bool, _ preview: @MainActor (String) -> Void) async throws -> String {
             var inputLanguage = sourceLanguage
+            var target = selectedTarget
+            if options.twoWay {
+                guard let detected = ChineseEnglishSource.detect(source, provisional: provisional) else {
+                    return provisional ? "" : source
+                }
+                inputLanguage = detected.rawValue
+                target = detected.target
+            }
             var instruction = "Translate the following text into \(target).\n\n\(source)"
             if options.useLmtTranslation {
                 if inputLanguage == "auto" {

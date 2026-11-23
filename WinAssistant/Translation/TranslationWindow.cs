@@ -22,9 +22,12 @@ internal sealed class TranslationWindow : Window
     private Brush Accent => (Brush)Resources["CaptionAccent"];
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
+    private Brush Danger => (Brush)Resources["CaptionDanger"];
     private readonly Button start = new() { MinWidth = 56, Padding = new Thickness(10, 5, 10, 5) };
-    private readonly Button startRecording = new();
+    private readonly Button twoWay = new();
+    private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+    private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox showSource = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox audioSource = new() { MinWidth = 132, VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox sourceLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
@@ -34,6 +37,12 @@ internal sealed class TranslationWindow : Window
     private readonly ComboBox originalSize = new() { Width = 53 };
     private readonly ComboBox translationSize = new() { Width = 53 };
     private readonly Button export = new() { IsEnabled = false };
+    private readonly StackPanel languagePickers = new() { Orientation = Orientation.Horizontal };
+    private readonly TextBlock twoWayLanguages = new()
+    {
+        Width = 252, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
+        FontWeight = FontWeights.SemiBold, Visibility = Visibility.Collapsed
+    };
     private readonly List<TranslationCaption> transcript = new();
     private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review)> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
@@ -42,6 +51,9 @@ internal sealed class TranslationWindow : Window
     private bool recordingSession;
     private bool identifiesSpeakers;
     private bool sourceOnlySession;
+    private bool listening;
+    private bool twoWaySession;
+    private int clearedThroughCaption;
 
     internal TranslationWindow(Action openSettings)
     {
@@ -54,8 +66,9 @@ internal sealed class TranslationWindow : Window
         Topmost = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         history = new ScrollViewer { Content = captions, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        start.Click += (_, _) => Toggle(false);
-        startRecording.Click += (_, _) => Toggle(true);
+        start.Click += (_, _) => Toggle(twoWayMode: false);
+        twoWay.Click += (_, _) => Toggle(twoWayMode: true);
+        clear.Click += (_, _) => ConfirmClearTranscript();
         showSource.Click += (_, _) =>
         {
             bool visible = showSource.IsChecked == true;
@@ -82,6 +95,7 @@ internal sealed class TranslationWindow : Window
         Resources["CaptionLine"] = ColorBrush(dark ? "#334158" : "#D9E1EC");
         Resources["CaptionHighlight"] = ColorBrush(dark ? "#1E3554" : "#EAF2FE");
         Resources["CaptionAccent"] = ColorBrush("#246BFE");
+        Resources["CaptionDanger"] = ColorBrush("#B33D4C");
         Resources.MergedDictionaries.Add(new ResourceDictionary
         {
             Source = new Uri("pack://application:,,,/Translation/TranslationWindowStyles.xaml", UriKind.Absolute)
@@ -89,17 +103,28 @@ internal sealed class TranslationWindow : Window
         var root = new DockPanel { Margin = new Thickness(12) };
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal };
+        DockPanel.SetDock(clear, Dock.Right);
+        header.Children.Add(clear);
         header.Children.Add(toolbar);
         DockPanel.SetDock(header, Dock.Top);
         root.Children.Add(header);
 
         foreach (var picker in new[] { audioSource, sourceLanguage, targetLanguage })
             picker.Style = (Style)Resources["CaptionPicker"];
-        foreach (var button in new[] { start, startRecording, swapLanguages })
+        foreach (var button in new[] { start, twoWay, clear, swapLanguages })
             button.Style = (Style)Resources["CaptionButton"];
         swapLanguages.VerticalAlignment = VerticalAlignment.Center;
         start.Background = start.BorderBrush = Accent;
         start.Foreground = Brushes.White;
+        twoWay.Background = ColorBrush(dark ? "#312445" : "#F2EBFF");
+        twoWay.BorderBrush = ColorBrush(dark ? "#5D4A7D" : "#D9C9F5");
+        twoWay.Foreground = ColorBrush(dark ? "#CCB5FF" : "#5F3DAD");
+        twoWay.Content = T("互译", "Two-way");
+        twoWayLanguages.Text = T("中文 ⇄ 英语", "Chinese ⇄ English");
+        twoWayLanguages.Foreground = twoWay.Foreground;
+        ToolTipService.SetShowOnDisabled(twoWay, true);
+        clear.Content = T("清屏", "Clear");
+        clear.ToolTip = T("清空当前字幕", "Clear current captions");
         showSource.Foreground = Foreground;
         showSource.Content = T("显示原文", "Show source");
         showSource.ToolTip = T("译文定稿后继续显示原文", "Keep the source visible after the translation is final");
@@ -167,20 +192,26 @@ internal sealed class TranslationWindow : Window
         sourceLanguage.ToolTip = T("源语言", "Source language");
         targetLanguage.ToolTip = T("目标语言", "Target language");
         var languages = new StackPanel { Orientation = Orientation.Horizontal };
-        languages.Children.Add(sourceLanguage);
-        languages.Children.Add(swapLanguages);
-        languages.Children.Add(targetLanguage);
+        languagePickers.Children.Add(sourceLanguage);
+        languagePickers.Children.Add(swapLanguages);
+        languagePickers.Children.Add(targetLanguage);
+        languages.Children.Add(languagePickers);
+        languages.Children.Add(twoWayLanguages);
         transcribeOnly.Foreground = Foreground;
         transcribeOnly.Content = T("仅记录", "Transcribe only");
         transcribeOnly.ToolTip = T("仅记录原文字幕", "Record source captions only");
         transcribeOnly.Click += (_, _) => UpdateLanguageControls();
         languages.Children.Add(transcribeOnly);
+        recordAudio.Foreground = Foreground;
+        recordAudio.Content = T("录音", "Record");
+        recordAudio.ToolTip = T("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads");
+        recordAudio.Click += (_, _) =>
+            ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
+        languages.Children.Add(recordAudio);
         start.Margin = new Thickness(10, 0, 0, 0);
-        startRecording.Margin = new Thickness(10, 0, 0, 0);
-        startRecording.Content = T("开始并录音", "Start and record");
-        startRecording.ToolTip = T("开始翻译并保存录音到下载文件夹", "Start translating and record to Downloads");
+        twoWay.Margin = new Thickness(8, 0, 0, 0);
         languages.Children.Add(start);
-        languages.Children.Add(startRecording);
+        languages.Children.Add(twoWay);
         footer.Children.Add(languages);
 
         foreach (var picker in new[] { compute, originalSize, translationSize })
@@ -250,6 +281,7 @@ internal sealed class TranslationWindow : Window
 
     private void SetStatus(string text, bool listening = false, bool failed = false, string? details = null)
     {
+        this.listening = listening;
         status.Text = text;
         statusIndicator.Background = failed || (listening && recordingSession) ? ColorBrush("#B33D42")
             : listening ? ColorBrush("#20A765") : Muted;
@@ -263,14 +295,21 @@ internal sealed class TranslationWindow : Window
 
     private void UpdateLanguageControls()
     {
+        languagePickers.Visibility = twoWaySession ? Visibility.Collapsed : Visibility.Visible;
+        twoWayLanguages.Visibility = twoWaySession ? Visibility.Visible : Visibility.Collapsed;
         sourceLanguage.IsEnabled = session is null && sourceLanguage.Items.Count != 0;
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
+        recordAudio.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
-        startRecording.ToolTip = translating
-            ? T("开始翻译并保存录音到下载文件夹", "Start translating and record to Downloads")
-            : T("开始记录原文并保存录音到下载文件夹", "Start transcribing and record to Downloads");
         var options = ConfigurationStore.Shared.Configuration.Translation;
+        bool twoWayReady = options.CanTranslateTwoWay;
+        twoWay.IsEnabled = session is null && translating && twoWayReady;
+        twoWay.ToolTip = !translating
+            ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
+            : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
+                : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
+        start.Background = start.BorderBrush = session is null ? Accent : Danger;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
             targetLanguage.SelectedValue is string target &&
             options.AvailableSourceLanguages.Contains(target) && options.TargetLanguagesFor(target).Contains(source);
@@ -291,6 +330,7 @@ internal sealed class TranslationWindow : Window
         translationSize.SelectedItem = options.SelectedTargetFontSize;
         if (session is null)
         {
+            recordAudio.IsChecked = options.RecordAudio;
             compute.SelectedValue = options.Compute is "auto" or "cpu" or "gpu" ? options.Compute : "auto";
             var index = (options.SystemAudio, options.Microphone) switch
             {
@@ -332,34 +372,32 @@ internal sealed class TranslationWindow : Window
         if (sessionCompletion is { } completion) await completion;
     }
 
-    private void Toggle(bool record)
+    private void Toggle(bool twoWayMode)
     {
         if (session is not null) { Stop(); return; }
-        sessionCompletion = RunSessionAsync(record);
+        sessionCompletion = RunSessionAsync(twoWayMode);
     }
 
-    private async Task RunSessionAsync(bool record)
+    private async Task RunSessionAsync(bool twoWayMode)
     {
         using var current = new CancellationTokenSource();
         session = current;
+        bool record = recordAudio.IsChecked == true;
         recordingSession = record;
-        startRecording.IsEnabled = false;
-        if (record) startRecording.Content = T("录音已开启", "Recording enabled");
+        twoWaySession = twoWayMode;
+        if (twoWayMode) twoWay.Content = T("互译中", "Two-way active");
         audioSource.IsEnabled = compute.IsEnabled = false;
         UpdateLanguageControls();
         var options = ConfigurationStore.Shared.Configuration.Translation.Copy();
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
+        options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
         identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
-        captions.Children.Clear();
-        transcript.Clear();
+        clearedThroughCaption = 0;
+        ResetTranscript();
         speakerNames.Clear();
-        visibleRows.Clear();
-        export.IsEnabled = false;
-        latest = null;
-        empty.Visibility = Visibility.Visible;
         start.Content = T("停止", "Stop");
         SetStatus(T("正在加载模型…", "Loading models…"));
         string result = T("已停止", "Stopped");
@@ -368,8 +406,10 @@ internal sealed class TranslationWindow : Window
         Action<string>? onSaved = record ? path => savedRecording = path : null;
         try
         {
-            string listening = record ? T("正在录音", "Recording") :
-                sourceOnlySession ? T("正在记录原文", "Transcribing") : T("正在监听", "Listening");
+            string listening = twoWayMode
+                ? (record ? T("互译并录音", "Two-way + recording") : T("正在互译", "Translating both ways"))
+                : record ? T("正在录音", "Recording") :
+                    sourceOnlySession ? T("正在记录原文", "Transcribing") : T("正在监听", "Listening");
             await Task.Run(() => new TranslationEngine().RunAsync(options, backend => PostCaption(() =>
             {
                 SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
@@ -393,8 +433,8 @@ internal sealed class TranslationWindow : Window
             SetStatus(result, failed: failed, details: savedRecording);
             session = null;
             recordingSession = false;
-            startRecording.IsEnabled = true;
-            startRecording.Content = T("开始并录音", "Start and record");
+            twoWaySession = false;
+            twoWay.Content = T("互译", "Two-way");
             audioSource.IsEnabled = compute.IsEnabled = true;
             UpdateLanguageControls();
             start.Content = T("开始", "Start");
@@ -408,8 +448,10 @@ internal sealed class TranslationWindow : Window
 
     private void ApplyCaption(TranslationCaption item)
     {
+        int index = item.Id - clearedThroughCaption - 1;
+        if (index < 0 || index > transcript.Count) return;
         bool follow = history.ScrollableHeight - history.VerticalOffset < 24;
-        if (item.Id > transcript.Count)
+        if (index == transcript.Count)
         {
             transcript.Add(item);
             var options = ConfigurationStore.Shared.Configuration.Translation;
@@ -473,10 +515,11 @@ internal sealed class TranslationWindow : Window
                 visibleRows.Remove(transcript[^251].Id);
             }
             empty.Visibility = Visibility.Collapsed;
+            clear.IsEnabled = true;
         }
         else
         {
-            transcript[item.Id - 1] = item;
+            transcript[index] = item;
         }
         export.IsEnabled |= item.SourceFinal;
         if (visibleRows.TryGetValue(item.Id, out var row))
@@ -527,6 +570,83 @@ internal sealed class TranslationWindow : Window
                 ? Visibility.Visible : Visibility.Collapsed;
         }
         if (follow) history.ScrollToEnd();
+    }
+
+    private void ResetTranscript()
+    {
+        captions.Children.Clear();
+        transcript.Clear();
+        visibleRows.Clear();
+        clear.IsEnabled = export.IsEnabled = false;
+        latest = null;
+        empty.Text = listening ? T("等待语音…", "Waiting for speech…") : status.Text;
+        empty.Visibility = Visibility.Visible;
+        history.ScrollToHome();
+    }
+
+    private void ConfirmClearTranscript()
+    {
+        if (transcript.Count == 0) return;
+        string title = T("清空当前字幕？", "Clear current captions?");
+        var dialog = new Window
+        {
+            Owner = this, Title = title, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Width = 420, SizeToContent = SizeToContent.Height, ResizeMode = ResizeMode.NoResize,
+            WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent,
+            ShowInTaskbar = false, Foreground = Foreground, FontSize = FontSize
+        };
+        dialog.Resources["CaptionAccent"] = Accent;
+        var panel = new StackPanel();
+        var header = new DockPanel();
+        var icon = new Border
+        {
+            Width = 40, Height = 40, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Top,
+            Background = ColorBrush("#22B33D4C"), Margin = new Thickness(0, 0, 14, 0),
+            Child = new TextBlock
+            {
+                Text = "\uE74D", FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 17,
+                Foreground = Danger, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        DockPanel.SetDock(icon, Dock.Left);
+        header.Children.Add(icon);
+        var message = new StackPanel();
+        message.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        message.Children.Add(new TextBlock
+        {
+            Text = T("已显示的原文和译文将从窗口和后续导出中移除。录音和已保存的文件会保留。",
+                "Visible captions and translations will be removed from the window and future exports. Audio recordings and saved files are kept."),
+            TextWrapping = TextWrapping.Wrap, Foreground = Muted, Margin = new Thickness(0, 6, 0, 0)
+        });
+        header.Children.Add(message);
+        panel.Children.Add(header);
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 18, 0, 0)
+        };
+        var cancel = new Button
+        {
+            Content = T("取消", "Cancel"), IsCancel = true, IsDefault = true, Foreground = Foreground,
+            Background = (Brush)Resources["CaptionSurface"], BorderBrush = Line, Style = (Style)Resources["CaptionButton"]
+        };
+        var confirm = new Button
+        {
+            Content = T("清空字幕", "Clear captions"), Margin = new Thickness(8, 0, 0, 0), Foreground = Brushes.White,
+            Background = Danger, BorderBrush = Danger, Style = (Style)Resources["CaptionButton"]
+        };
+        confirm.Click += (_, _) => dialog.DialogResult = true;
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(confirm);
+        panel.Children.Add(buttons);
+        dialog.Content = new Border
+        {
+            Background = (Brush)Resources["CaptionSurface"], BorderBrush = Line, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(20), Child = panel
+        };
+        dialog.Loaded += (_, _) => cancel.Focus();
+        if (dialog.ShowDialog() != true || transcript.Count == 0) return;
+        clearedThroughCaption = transcript[^1].Id;
+        ResetTranscript();
     }
 
     private string SpeakerName(int id) =>
@@ -623,7 +743,7 @@ internal sealed class TranslationWindow : Window
     {
         foreach (var (id, row) in visibleRows)
         {
-            var item = transcript[id - 1];
+            var item = transcript[id - clearedThroughCaption - 1];
             row.Original.Visibility = ShowOriginal(item, visible) ? Visibility.Visible : Visibility.Collapsed;
         }
     }
