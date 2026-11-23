@@ -275,11 +275,12 @@ private struct TranslationWindowView: View {
     private var dark: Bool { settings.theme == "Dark" }
     private let accent = Color(red: 0.14, green: 0.42, blue: 0.996)
     private let stopAccent = Color(red: 0.70, green: 0.24, blue: 0.30)
-    private var twoWayAccent: Color {
-        dark ? Color(red: 0.80, green: 0.71, blue: 1) : Color(red: 0.37, green: 0.24, blue: 0.68)
+    private var sessionButtonTitle: String {
+        guard controller.running else { return t("开始", "Start") }
+        return controller.twoWaySession ? t("互译结束", "End two-way translation") : t("翻译结束", "End translation")
     }
     private var canStartTwoWay: Bool {
-        !controller.running && !controller.transcribeOnly && settings.translationOptions.canTranslateTwoWay
+        !controller.transcribeOnly && settings.translationOptions.canTranslateTwoWay
     }
     private var line: Color {
         dark ? Color(red: 0.20, green: 0.25, blue: 0.35) : Color(red: 0.85, green: 0.88, blue: 0.93)
@@ -377,35 +378,27 @@ private struct TranslationWindowView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            if controller.twoWaySession {
-                Text(t("中文 ⇄ 英语", "Chinese ⇄ English"))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(twoWayAccent)
-                    .padding(.leading, 8)
-                    .frame(width: 254, alignment: .leading)
-            } else {
-                HStack(spacing: 6) {
-                    Picker(t("源语言", "Source language"), selection: $controller.sourceLanguage) {
-                        translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
-                    }
-                    .labelsHidden()
-                    .frame(width: 110)
-                    .disabled(settings.translationOptions.availableSourceLanguages.isEmpty)
-                    Button { controller.swapLanguages() } label: {
-                        Image(systemName: "arrow.left.arrow.right")
-                    }
-                    .accessibilityLabel(t("交换语言", "Swap languages"))
-                    .help(t("交换语言", "Swap languages"))
-                    .disabled(!controller.canSwapLanguages)
-                    Picker(t("目标语言", "Target language"), selection: $controller.targetLanguage) {
-                        translationLanguageChoices(settings.translationOptions.targetLanguages(for: controller.sourceLanguage), english: settings.language == "en-US")
-                    }
-                    .labelsHidden()
-                    .frame(width: 110)
-                    .disabled(controller.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
+            HStack(spacing: 6) {
+                Picker(t("源语言", "Source language"), selection: $controller.sourceLanguage) {
+                    translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
                 }
-                .disabled(controller.running)
+                .labelsHidden()
+                .frame(width: 110)
+                .disabled(settings.translationOptions.availableSourceLanguages.isEmpty)
+                Button { controller.swapLanguages() } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                }
+                .accessibilityLabel(t("交换语言", "Swap languages"))
+                .help(t("交换语言", "Swap languages"))
+                .disabled(!controller.canSwapLanguages)
+                Picker(t("目标语言", "Target language"), selection: $controller.targetLanguage) {
+                    translationLanguageChoices(settings.translationOptions.targetLanguages(for: controller.sourceLanguage), english: settings.language == "en-US")
+                }
+                .labelsHidden()
+                .frame(width: 110)
+                .disabled(controller.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
             }
+            .disabled(controller.running)
             Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
                 .help(t("仅记录原文字幕", "Record source captions only"))
                 .toggleStyle(.switch)
@@ -418,14 +411,15 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running)
-            sessionButton(controller.running ? t("停止", "Stop") : t("开始", "Start"),
-                          tint: controller.running ? stopAccent : accent) { controller.toggle() }
+            sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .padding(.leading, 4)
-            sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
-                controller.toggle(twoWay: true)
+            if !controller.running {
+                sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
+                    controller.toggle(twoWay: true)
+                }
+                .disabled(!canStartTwoWay)
+                .help(twoWayHelp)
             }
-            .disabled(!canStartTwoWay)
-            .help(twoWayHelp)
             Spacer(minLength: 8)
             HStack(spacing: 6) {
                 Circle()
@@ -446,6 +440,7 @@ private struct TranslationWindowView: View {
             Text(title)
                 .fontWeight(.semibold)
                 .frame(minWidth: 54)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.borderedProminent)
         .tint(tint)

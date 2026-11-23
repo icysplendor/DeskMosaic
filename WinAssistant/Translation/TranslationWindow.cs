@@ -23,7 +23,7 @@ internal sealed class TranslationWindow : Window
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
     private Brush Danger => (Brush)Resources["CaptionDanger"];
-    private readonly Button start = new() { Width = 80 };
+    private readonly Button start = new() { MinWidth = 80 };
     private readonly Button twoWay = new() { Width = 80 };
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -37,12 +37,6 @@ internal sealed class TranslationWindow : Window
     private readonly ComboBox originalSize = new() { Width = 53 };
     private readonly ComboBox translationSize = new() { Width = 53 };
     private readonly Button export = new() { IsEnabled = false };
-    private readonly StackPanel languagePickers = new() { Orientation = Orientation.Horizontal };
-    private readonly TextBlock twoWayLanguages = new()
-    {
-        Width = 252, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0),
-        FontWeight = FontWeights.SemiBold, Visibility = Visibility.Collapsed
-    };
     private readonly List<TranslationCaption> transcript = new();
     private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review)> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
@@ -120,8 +114,6 @@ internal sealed class TranslationWindow : Window
         twoWay.Background = twoWay.BorderBrush = ColorBrush("#6642B8");
         twoWay.Foreground = Brushes.White;
         twoWay.Content = T("互译", "Two-way");
-        twoWayLanguages.Text = T("中文 ⇄ 英语", "Chinese ⇄ English");
-        twoWayLanguages.Foreground = ColorBrush(dark ? "#CCB5FF" : "#5F3DAD");
         ToolTipService.SetShowOnDisabled(twoWay, true);
         clear.Content = T("清屏", "Clear");
         clear.ToolTip = T("清空当前字幕", "Clear current captions");
@@ -192,11 +184,9 @@ internal sealed class TranslationWindow : Window
         sourceLanguage.ToolTip = T("源语言", "Source language");
         targetLanguage.ToolTip = T("目标语言", "Target language");
         var languages = new StackPanel { Orientation = Orientation.Horizontal };
-        languagePickers.Children.Add(sourceLanguage);
-        languagePickers.Children.Add(swapLanguages);
-        languagePickers.Children.Add(targetLanguage);
-        languages.Children.Add(languagePickers);
-        languages.Children.Add(twoWayLanguages);
+        languages.Children.Add(sourceLanguage);
+        languages.Children.Add(swapLanguages);
+        languages.Children.Add(targetLanguage);
         transcribeOnly.Foreground = Foreground;
         transcribeOnly.Content = T("仅记录", "Transcribe only");
         transcribeOnly.ToolTip = T("仅记录原文字幕", "Record source captions only");
@@ -274,7 +264,6 @@ internal sealed class TranslationWindow : Window
             toolbar.Children.Add(field);
         }
         Content = root;
-        start.Content = T("开始", "Start");
         SetStatus(T("就绪", "Ready"));
 
     }
@@ -295,8 +284,6 @@ internal sealed class TranslationWindow : Window
 
     private void UpdateLanguageControls()
     {
-        languagePickers.Visibility = twoWaySession ? Visibility.Collapsed : Visibility.Visible;
-        twoWayLanguages.Visibility = twoWaySession ? Visibility.Visible : Visibility.Collapsed;
         sourceLanguage.IsEnabled = session is null && sourceLanguage.Items.Count != 0;
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
@@ -304,11 +291,14 @@ internal sealed class TranslationWindow : Window
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
         var options = ConfigurationStore.Shared.Configuration.Translation;
         bool twoWayReady = options.CanTranslateTwoWay;
+        twoWay.Visibility = session is null ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
         twoWay.ToolTip = !translating
             ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
                 : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
+        start.Content = session is null ? T("开始", "Start")
+            : twoWaySession ? T("互译结束", "End two-way translation") : T("翻译结束", "End translation");
         start.Background = start.BorderBrush = session is null ? Accent : Danger;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
             targetLanguage.SelectedValue is string target &&
@@ -397,7 +387,6 @@ internal sealed class TranslationWindow : Window
         clearedThroughCaption = 0;
         ResetTranscript();
         speakerNames.Clear();
-        start.Content = T("停止", "Stop");
         SetStatus(T("正在加载模型…", "Loading models…"));
         string result = T("已停止", "Stopped");
         bool failed = false;
@@ -442,7 +431,6 @@ internal sealed class TranslationWindow : Window
             twoWaySession = false;
             audioSource.IsEnabled = compute.IsEnabled = true;
             UpdateLanguageControls();
-            start.Content = T("开始", "Start");
         }
 
         void PostCaption(Action update) => _ = Dispatcher.InvokeAsync(() =>
@@ -569,7 +557,6 @@ internal sealed class TranslationWindow : Window
                 "" => T("未生成译文", "Translation unavailable"),
                 _ => item.Translation
             };
-            row.Translation.FontStyle = item.TranslationFinal ? FontStyles.Normal : FontStyles.Italic;
             row.Translation.Foreground = string.IsNullOrEmpty(item.Translation) ? Muted : Foreground;
             row.Original.Visibility = ShowOriginal(item, showSource.IsChecked == true)
                 ? Visibility.Visible : Visibility.Collapsed;
