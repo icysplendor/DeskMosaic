@@ -9,56 +9,19 @@ namespace WinAssistant.Translation;
 
 internal static class StreamingRecognition
 {
-    internal static async Task RunAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive, string executable, Action ready, Func<Task>? translationReady,
+    internal static async Task RunAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive, Action capturing, Action ready, Func<Task>? translationReady,
         Action<TranslationCaption> caption, Func<string, bool, Action<string>, CancellationToken, Task<string>>? translate, CancellationToken token, Action<string>? recordingSaved = null)
     {
         using var diagnostic = options.DiagnosticsEnabled ? OpenDiagnosticLog() : null;
         Log($"session_started fast_model={speechModel.Id} source_language={options.SelectedSourceLanguage}");
-        var model = await PrepareModel(speechModel, archive, token, Log);
         using var session = CancellationTokenSource.CreateLinkedTokenSource(token);
         var active = session.Token;
-        string speaker = options.SelectedSpeakerModel;
-        string[] arguments = ["1", "-"];
-        if (speaker.Length != 0)
-        {
-            const string speakerFile = "speaker.gguf";
-            await PrepareSpeaker(speaker, Path.Combine(model, speakerFile), token);
-            arguments = [.. arguments, speakerFile, "-", options.Compute == "cpu" ? "cpu" : "auto"];
-        }
         var correction = StreamingSpeechModel.Correction;
         string correctionArchive = options.SelectedCorrectionModel;
         bool correctParagraphs = options.EnableCorrection && correctionArchive.Length != 0 &&
             correction.Languages.Contains(options.SelectedSourceLanguage);
         Log($"review_configuration enabled={options.EnableCorrection} archive_found={correctionArchive.Length != 0} eligible={correctParagraphs}");
-        string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
-        if (correctionDirectory is not null)
-            arguments = [.. arguments, "--correction", correctionDirectory];
-        var microphoneEnvironment = new Dictionary<string, string?>
-        {
-            ["ASSISTANT_MIC_VAD"] = options.Microphone ? options.MicrophoneFilter : "off",
-            ["ASSISTANT_MIC_PAUSE"] = options.MicrophonePause,
-            ["ASSISTANT_MIC_VAD_MODEL"] = null
-        };
-        string detector = Path.Combine(Path.GetDirectoryName(executable)!, "silero_vad.onnx");
-        if (File.Exists(detector)) microphoneEnvironment["ASSISTANT_MIC_VAD_MODEL"] = detector;
-        using var helper = Start(executable, model, true, arguments, correctionDirectory, microphoneEnvironment);
-        using var terminate = active.Register(() => Kill(helper));
-        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(active))
-        {
-            timeout.CancelAfter(TimeSpan.FromSeconds(60));
-            try
-            {
-                if (await helper.StandardOutput.ReadLineAsync(timeout.Token) != "ready")
-                    throw new InvalidOperationException("中英流式识别启动失败。 / Streaming ASR failed to start.");
-            }
-            catch (OperationCanceledException) when (!active.IsCancellationRequested)
-            {
-                throw new TimeoutException("加载中英流式模型超时。 / Streaming ASR model load timed out.");
-            }
-        }
-
-        Log("fast_engine_ready");
-        var frames = Channel.CreateBounded<byte[]>(120);
+        var frames = new BufferedAudio<byte[]>();
         var signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         var state = new object();
         var drafts = new TranslationCaption?[2];
@@ -66,30 +29,88 @@ internal static class StreamingRecognition
         var pendingCorrections = new Dictionary<int, TranslationCaption>();
         var lastRequest = new long[2];
         var captures = new List<Task>();
+        int captureStarted = 0;
         CancellationTokenSource? draftRequest = null;
         TranslationCaption? draftInput = null;
         bool draftHasOutput = false;
         var id = 0;
-        var recording = recordingSaved is null ? null : new TranslationRecording(executable, options.SystemAudio && options.Microphone);
-        Task[] workers = [];
-        Task? correctionPreparation = correctParagraphs ? Task.Run(PrepareCorrection) : null;
+        var runtime = Task.Run(() => BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe"));
+        var recording = recordingSaved is null ? null : new TranslationRecording(runtime, options.SystemAudio && options.Microphone);
+        Task? recognition = null;
         try
         {
             if (options.SystemAudio) StartCapture(false);
             if (options.Microphone) StartCapture(true);
-            ready();
-            var recognitionWorkers = captures.Append(WriteAudio()).Append(Recognize());
-            workers = (translationReady is null ? recognitionWorkers : recognitionWorkers.Append(Translate(translationReady))).ToArray();
-            await await Task.WhenAny(workers);
+            recognition = RunRecognition();
+            await await Task.WhenAny(captures.Append(recognition));
         }
         finally
         {
             session.Cancel();
-            try { await Task.WhenAll(workers.Length == 0 ? captures.ToArray() : workers); }
-            catch (Exception) { /* Report the first completed worker above. */ }
-            if (correctionPreparation is not null) await correctionPreparation;
+            try { await Task.WhenAll(recognition is null ? captures : captures.Append(recognition)); }
+            catch (Exception) { /* The first failure is already reported above. */ }
+            frames.Complete();
             if (recording is not null && await recording.FinishAsync() is { } path) recordingSaved?.Invoke(path);
             Log("session_ended");
+        }
+
+        async Task RunRecognition()
+        {
+            string executable = await runtime.WaitAsync(active);
+            var model = await PrepareModel(speechModel, archive, active, Log);
+            string speaker = options.SelectedSpeakerModel;
+            string[] arguments = ["1", "-"];
+            if (speaker.Length != 0)
+            {
+                const string speakerFile = "speaker.gguf";
+                await PrepareSpeaker(speaker, Path.Combine(model, speakerFile), active);
+                arguments = [.. arguments, speakerFile, "-", options.Compute == "cpu" ? "cpu" : "auto"];
+            }
+            string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
+            if (correctionDirectory is not null)
+                arguments = [.. arguments, "--correction", correctionDirectory];
+            var microphoneEnvironment = new Dictionary<string, string?>
+            {
+                ["ASSISTANT_MIC_VAD"] = options.Microphone ? options.MicrophoneFilter : "off",
+                ["ASSISTANT_MIC_PAUSE"] = options.MicrophonePause,
+                ["ASSISTANT_MIC_VAD_MODEL"] = null
+            };
+            string detector = Path.Combine(Path.GetDirectoryName(executable)!, "silero_vad.onnx");
+            if (File.Exists(detector)) microphoneEnvironment["ASSISTANT_MIC_VAD_MODEL"] = detector;
+            using var helper = Start(executable, model, true, arguments, correctionDirectory, microphoneEnvironment);
+            using var terminate = active.Register(() => Kill(helper));
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(active))
+            {
+                timeout.CancelAfter(TimeSpan.FromSeconds(60));
+                try
+                {
+                    if (await helper.StandardOutput.ReadLineAsync(timeout.Token) != "ready")
+                        throw new InvalidOperationException("中英流式识别启动失败。 / Streaming ASR failed to start.");
+                }
+                catch (OperationCanceledException) when (!active.IsCancellationRequested)
+                {
+                    throw new TimeoutException("加载中英流式模型超时。 / Streaming ASR model load timed out.");
+                }
+            }
+
+            Log("fast_engine_ready");
+            ready();
+            var workers = new List<Task> { WriteAudio(helper), Recognize(helper) };
+            Task? correctionPreparation = correctParagraphs ? Task.Run(PrepareCorrection) : null;
+            if (correctionPreparation is not null) workers.Add(correctionPreparation);
+            if (translationReady is not null) workers.Add(Translate(translationReady));
+            try
+            {
+                // The correction preparation task may complete normally while recognition continues.
+                var foreground = workers.Where(worker => worker != correctionPreparation);
+                await await Task.WhenAny(foreground);
+            }
+            finally
+            {
+                session.Cancel();
+                try { await Task.WhenAll(workers); }
+                catch (Exception) { /* The first failure is already reported above. */ }
+            }
         }
 
         void Log(string message)
@@ -115,15 +136,12 @@ internal static class StreamingRecognition
                     $"review_preparation_failed type={error.GetType().Name} code=0x{error.HResult:X8}");
                 Debug.WriteLine(error);
             }
-            try
-            {
-                // A control header goes through the single writer, outside the recording.
-                var header = new byte[12];
-                BinaryPrimitives.WriteUInt32LittleEndian(header, uint.MaxValue);
-                BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), prepared ? 1u : 0u);
-                await frames.Writer.WriteAsync(header, active);
-            }
-            catch (OperationCanceledException) when (active.IsCancellationRequested) { }
+            if (active.IsCancellationRequested) return;
+            // A control header goes through the single writer, outside the recording.
+            var header = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(header, uint.MaxValue);
+            BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(4), prepared ? 1u : 0u);
+            if (!frames.TryAppend(header, header.Length)) Log("review_preparation_header_buffer_full");
         }
 
         void StartCapture(bool microphone)
@@ -141,6 +159,9 @@ internal static class StreamingRecognition
                 if (rate == 0 || Environment.TickCount64 - lastPacket < 100) return;
                 lastPacket = Environment.TickCount64;
                 Enqueue(new float[rate / 10]);
+            }, () =>
+            {
+                if (Interlocked.Exchange(ref captureStarted, 1) == 0) capturing();
             }, active));
 
             void Enqueue(float[] samples)
@@ -155,19 +176,19 @@ internal static class StreamingRecognition
                     header[2] = count;
                     Buffer.BlockCopy(samples, offset * sizeof(float), packet, 12, count * sizeof(float));
                     recording?.Append(packet);
-                    if (!frames.Writer.TryWrite(packet))
-                        throw new InvalidOperationException("语音识别跟不上音频。 / Streaming ASR is not keeping up with audio.");
+                    if (!frames.TryAppend(packet, packet.Length) && !active.IsCancellationRequested)
+                        throw new InvalidOperationException("暂存音频已满，语音识别跟不上。 / The audio buffer is full; recognition could not keep up.");
                 }
             }
         }
 
-        async Task WriteAudio()
+        async Task WriteAudio(Process helper)
         {
-            await foreach (var packet in frames.Reader.ReadAllAsync(active))
+            await foreach (var packet in frames.ReadAllAsync(active))
                 await helper.StandardInput.BaseStream.WriteAsync(packet, active);
         }
 
-        async Task Recognize()
+        async Task Recognize(Process helper)
         {
             while (await helper.StandardOutput.ReadLineAsync(active) is { } line)
             {
@@ -253,7 +274,7 @@ internal static class StreamingRecognition
 
         void QueueFinal(TranslationCaption item)
         {
-            if (pendingFinals.Count == 8) caption(pendingFinals.Dequeue() with { Translation = "", TranslationFinal = true });
+            if (pendingFinals.Count == 256) caption(pendingFinals.Dequeue() with { Translation = "", TranslationFinal = true });
             pendingFinals.Enqueue(item);
             draftRequest?.Cancel();
         }

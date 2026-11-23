@@ -23,10 +23,58 @@ final class StreamingRecognition {
 
     typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> String
 
-    func run(options: TranslationOptions, model: StreamingSpeechModel, archive: String, record: Bool, ready: () -> Void,
+    func run(options: TranslationOptions, model: StreamingSpeechModel, archive: String, record: Bool, capturing: () -> Void, ready: () -> Void,
              translationReady: (() async throws -> Void)?, caption: @escaping (TranslationCaption) -> Void,
              translate: Translate?, diagnostic: TranslationDiagnosticLog?) async throws {
         diagnostic?.write("speech_model_selected model=\(model.id)")
+        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
+        let helperURL = folder.appendingPathComponent("Helpers/streaming-asr")
+        let (lines, events) = AsyncThrowingStream<String, Error>.makeStream()
+        defer {
+            stop()
+            events.finish()
+        }
+        try Task.checkCancellation()
+        let recorder = try record ? TranslationRecording(
+            executable: helperURL,
+            stereo: options.systemAudio && options.microphone) : nil
+        recording = recorder
+        let audio = StreamingAudioBuffer()
+        let send: (Data) -> Void = { data in
+            if let recorder, !recorder.append(data) {
+                events.finish(throwing: TranslationRecordingError(message: TranslationError(
+                    "录音写入速度跟不上。", "The audio recorder could not keep up.")))
+            }
+            if !audio.append(data) {
+                events.finish(throwing: TranslationError("暂存音频已满，语音识别跟不上。", "The audio buffer is full; recognition could not keep up."))
+            }
+        }
+        let system = StreamingAudioPacketizer(source: 0, emit: send)
+        let microphone = StreamingAudioPacketizer(source: 1, emit: send)
+        let capture = TranslationAudioCapture(system: system.append, microphone: microphone.append) {
+            diagnostic?.failure("audio_capture_failed", $0)
+            events.finish(throwing: $0)
+        }
+        self.capture = capture
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "assistant.translation.streaming"))
+        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        timer.setEventHandler { system.tick(); microphone.tick() }
+        timer.resume()
+        defer {
+            timer.cancel()
+            audio.finish()
+        }
+        diagnostic?.write("audio_capture_starting system=\(options.systemAudio) microphone=\(options.microphone)")
+        do { try await capture.start(system: options.systemAudio, microphone: options.microphone) }
+        catch {
+            diagnostic?.failure("audio_capture_start_failed", error)
+            throw error
+        }
+        try Task.checkCancellation()
+        diagnostic?.write("audio_capture_ready")
+        capturing()
+
         let speaker = options.selectedSpeakerModel
         let speakerFile = "speaker.gguf"
         let preparation = Task.detached {
@@ -41,9 +89,7 @@ final class StreamingRecognition {
         let model = try await withTaskCancellationHandler(operation: { try await preparation.value },
                                                           onCancel: { preparation.cancel() })
         try Task.checkCancellation()
-        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
         let helper = Process()
-        let helperURL = folder.appendingPathComponent("Helpers/streaming-asr")
         helper.executableURL = helperURL
         helper.currentDirectoryURL = model
         helper.arguments = ["1",
@@ -75,15 +121,10 @@ final class StreamingRecognition {
         guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
             throw TranslationError("无法初始化流式语音通道。", "Could not initialize the streaming audio pipe.")
         }
-        let (lines, events) = AsyncThrowingStream<String, Error>.makeStream()
         let reader = StreamingLineReader(events: events)
         let outputHandle = output.fileHandleForReading
         outputHandle.readabilityHandler = { reader.read($0) }
-        defer {
-            stop()
-            outputHandle.readabilityHandler = nil
-            events.finish()
-        }
+        defer { outputHandle.readabilityHandler = nil }
         diagnostic?.watch(helper, name: "streaming_asr")
         diagnostic?.write("speech_helper_checks executable=\(FileManager.default.isExecutableFile(atPath: helperURL.path))")
         do { try helper.run() }
@@ -108,11 +149,6 @@ final class StreamingRecognition {
         deadline.cancel()
         diagnostic?.write("fast_engine_ready")
 
-        let recorder = try record ? TranslationRecording(
-            executable: folder.appendingPathComponent("Helpers/streaming-asr"),
-            stereo: options.systemAudio && options.microphone) : nil
-        recording = recorder
-        let (audio, frames) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingOldest(120))
         let correctionPreparation = Task.detached(priority: .utility) {
             guard correctParagraphs else { return }
             let prepared: Bool
@@ -126,8 +162,8 @@ final class StreamingRecognition {
             }
             guard !Task.isCancelled else { return }
             let header: [UInt32] = [.max, prepared ? 1 : 0, 0]
-            if case .dropped = frames.yield(header.withUnsafeBytes { Data($0) }) {
-                events.finish(throwing: TranslationError("语音识别跟不上音频。", "Streaming ASR is not keeping up with audio."))
+            if !audio.append(header.withUnsafeBytes { Data($0) }) {
+                diagnostic?.write("review_preparation_header_buffer_full")
             }
         }
         defer { correctionPreparation.cancel() }
@@ -135,43 +171,13 @@ final class StreamingRecognition {
         let writer = Task.detached {
             defer { try? writerHandle.close() }
             do {
-                for await frame in audio { try writerHandle.write(contentsOf: frame) }
+                for await frame in audio.frames {
+                    audio.consumed(frame.count)
+                    try writerHandle.write(contentsOf: frame)
+                }
             } catch { events.finish(throwing: error) }
         }
-        let send: (Data) -> Void = { data in
-            if let recorder, !recorder.append(data) {
-                events.finish(throwing: TranslationRecordingError(message: TranslationError(
-                    "录音写入速度跟不上。", "The audio recorder could not keep up.")))
-            }
-            if case .dropped = frames.yield(data) {
-                events.finish(throwing: TranslationError("语音识别跟不上音频。", "Streaming ASR is not keeping up with audio."))
-            }
-        }
-        let system = StreamingAudioPacketizer(source: 0, emit: send)
-        let microphone = StreamingAudioPacketizer(source: 1, emit: send)
-        let capture = TranslationAudioCapture(system: system.append, microphone: microphone.append) {
-            diagnostic?.failure("audio_capture_failed", $0)
-            events.finish(throwing: $0)
-        }
-        self.capture = capture
-
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "assistant.translation.streaming"))
-        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
-        timer.setEventHandler { system.tick(); microphone.tick() }
-        timer.resume()
-        defer {
-            timer.cancel()
-            frames.finish()
-            writer.cancel()
-        }
-        diagnostic?.write("audio_capture_starting system=\(options.systemAudio) microphone=\(options.microphone)")
-        do { try await capture.start(system: options.systemAudio, microphone: options.microphone) }
-        catch {
-            diagnostic?.failure("audio_capture_start_failed", error)
-            throw error
-        }
-        try Task.checkCancellation()
-        diagnostic?.write("audio_capture_ready")
+        defer { writer.cancel() }
         ready()
 
         let (updates, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -330,7 +336,7 @@ final class StreamingRecognition {
         throw TranslationError("中英流式识别已意外退出。", "Streaming ASR exited unexpectedly.")
 
         func queueFinal(_ item: TranslationCaption) {
-            if pendingFinals.count == 8 {
+            if pendingFinals.count == 256 {
                 var dropped = pendingFinals.removeFirst()
                 dropped.translation = ""
                 dropped.translationFinal = true
@@ -544,6 +550,40 @@ private final class StreamingLineReader: @unchecked Sendable {
             pending.removeSubrange(...end)
         }
     }
+}
+
+private final class StreamingAudioBuffer: @unchecked Sendable {
+    let frames: AsyncStream<Data>
+    private let continuation: AsyncStream<Data>.Continuation
+    private let lock = NSLock()
+    private var bufferedBytes = 0
+
+    init() {
+        let (stream, sink) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingOldest(16384))
+        frames = stream
+        continuation = sink
+    }
+
+    func append(_ frame: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard bufferedBytes + frame.count <= 64 * 1024 * 1024 else { return false }
+        switch continuation.yield(frame) {
+        case .enqueued:
+            bufferedBytes += frame.count
+            return true
+        case .terminated: return true
+        default: return false
+        }
+    }
+
+    func consumed(_ bytes: Int) {
+        lock.lock()
+        bufferedBytes -= bytes
+        lock.unlock()
+    }
+
+    func finish() { continuation.finish() }
 }
 
 private final class StreamingAudioPacketizer: @unchecked Sendable {

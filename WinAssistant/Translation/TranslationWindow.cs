@@ -23,8 +23,8 @@ internal sealed class TranslationWindow : Window
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
     private Brush Danger => (Brush)Resources["CaptionDanger"];
-    private readonly Button start = new() { MinWidth = 56, Padding = new Thickness(10, 5, 10, 5) };
-    private readonly Button twoWay = new();
+    private readonly Button start = new() { Width = 80 };
+    private readonly Button twoWay = new() { Width = 80 };
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -116,12 +116,11 @@ internal sealed class TranslationWindow : Window
         swapLanguages.VerticalAlignment = VerticalAlignment.Center;
         start.Background = start.BorderBrush = Accent;
         start.Foreground = Brushes.White;
-        twoWay.Background = ColorBrush(dark ? "#312445" : "#F2EBFF");
-        twoWay.BorderBrush = ColorBrush(dark ? "#5D4A7D" : "#D9C9F5");
-        twoWay.Foreground = ColorBrush(dark ? "#CCB5FF" : "#5F3DAD");
+        twoWay.Background = twoWay.BorderBrush = ColorBrush("#6642B8");
+        twoWay.Foreground = Brushes.White;
         twoWay.Content = T("互译", "Two-way");
         twoWayLanguages.Text = T("中文 ⇄ 英语", "Chinese ⇄ English");
-        twoWayLanguages.Foreground = twoWay.Foreground;
+        twoWayLanguages.Foreground = ColorBrush(dark ? "#CCB5FF" : "#5F3DAD");
         ToolTipService.SetShowOnDisabled(twoWay, true);
         clear.Content = T("清屏", "Clear");
         clear.ToolTip = T("清空当前字幕", "Clear current captions");
@@ -385,7 +384,6 @@ internal sealed class TranslationWindow : Window
         bool record = recordAudio.IsChecked == true;
         recordingSession = record;
         twoWaySession = twoWayMode;
-        if (twoWayMode) twoWay.Content = T("互译中", "Two-way active");
         audioSource.IsEnabled = compute.IsEnabled = false;
         UpdateLanguageControls();
         var options = ConfigurationStore.Shared.Configuration.Translation.Copy();
@@ -410,8 +408,15 @@ internal sealed class TranslationWindow : Window
                 ? (record ? T("互译并录音", "Two-way + recording") : T("正在互译", "Translating both ways"))
                 : record ? T("正在录音", "Recording") :
                     sourceOnlySession ? T("正在记录原文", "Transcribing") : T("正在监听", "Listening");
-            await Task.Run(() => new TranslationEngine().RunAsync(options, backend => PostCaption(() =>
+            bool recognizing = false;
+            await Task.Run(() => new TranslationEngine().RunAsync(options, () => PostCaption(() =>
             {
+                if (!recognizing)
+                    SetStatus(record ? T("正在录音 · 加载模型…", "Recording · Loading models…") :
+                        T("正在采集 · 加载模型…", "Capturing audio · Loading models…"), listening: true);
+            }), backend => PostCaption(() =>
+            {
+                recognizing = true;
                 SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
             }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved));
         }
@@ -434,7 +439,6 @@ internal sealed class TranslationWindow : Window
             session = null;
             recordingSession = false;
             twoWaySession = false;
-            twoWay.Content = T("互译", "Two-way");
             audioSource.IsEnabled = compute.IsEnabled = true;
             UpdateLanguageControls();
             start.Content = T("开始", "Start");

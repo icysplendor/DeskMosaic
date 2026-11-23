@@ -353,11 +353,35 @@ jobs:
           }
           Get-FileHash -Algorithm SHA256 -LiteralPath $exe
 
-      - name: Upload EXE
+      - name: Create and verify portable ZIP
+        shell: pwsh
+        run: |
+          $exe = "release/DeskMosaic-windows-x64.exe"
+          $zip = "release/DeskMosaic-windows-x64.zip"
+          Compress-Archive -LiteralPath $exe -DestinationPath $zip
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          try {
+            $entry = $archive.GetEntry("DeskMosaic-windows-x64.exe")
+            if ($archive.Entries.Count -ne 1 -or $null -eq $entry) {
+              throw "Windows ZIP 必须只包含发布 EXE"
+            }
+            $stream = $entry.Open()
+            try {
+              if ((Get-FileHash -InputStream $stream).Hash -ne (Get-FileHash -LiteralPath $exe).Hash) {
+                throw "ZIP 中的 Windows EXE 与发布 EXE 不一致"
+              }
+            }
+            finally { $stream.Dispose() }
+          }
+          finally { $archive.Dispose() }
+
+      - name: Upload Windows packages
         uses: actions/upload-artifact@v4
         with:
           name: winassistant-windows-x64
-          path: release/DeskMosaic-windows-x64.exe
+          path: |
+            release/DeskMosaic-windows-x64.exe
+            release/DeskMosaic-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -415,7 +439,7 @@ jobs:
       - name: Create release
         run: |
           shopt -s nullglob
-          assets=(release-assets/*.dmg release-assets/*.exe release-assets/recording-encoder-source-*.zip)
+          assets=(release-assets/*.dmg release-assets/*.exe release-assets/DeskMosaic-windows-*.zip release-assets/recording-encoder-source-*.zip)
           options=(--target "$GITHUB_SHA" --generate-notes --title "DeskMosaic $RELEASE_TAG")
           if [[ "$PRERELEASE" == "true" ]]; then
             options+=(--prerelease)

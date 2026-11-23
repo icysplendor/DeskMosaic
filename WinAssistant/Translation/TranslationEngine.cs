@@ -28,7 +28,7 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
 
 internal sealed class TranslationEngine
 {
-    internal async Task RunAsync(TranslationOptions options, Action<string?> status,
+    internal async Task RunAsync(TranslationOptions options, Action capturing, Action<string?> status,
         Action<TranslationCaption> caption, CancellationToken token, Action<string>? recordingSaved = null)
     {
         if (!options.SystemAudio && !options.Microphone)
@@ -38,18 +38,12 @@ internal sealed class TranslationEngine
         string translationModel = options.TranscribeOnly ? "" : options.SelectedTranslationModel;
         if (!options.TranscribeOnly && translationModel.Length == 0)
             throw new InvalidOperationException("请在录写/翻译设置中下载或选择当前的文本翻译模型。 / Install the selected text translation model in Transcribe / Translate settings.");
-        var recognizerPath = await Task.Run(() =>
-            BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe"), token);
-        token.ThrowIfCancellationRequested();
         if (options.TranscribeOnly)
         {
-            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), recognizerPath, () => status(null),
+            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
                 null, caption, null, token, recordingSaved);
             return;
         }
-
-        var llamaPath = await Task.Run(() =>
-            BundledTranslationRuntime.Resolve(options.LlamaServer, "llama", "llama-server.exe"), token);
 
         using var session = CancellationTokenSource.CreateLinkedTokenSource(token);
         var active = session.Token;
@@ -60,7 +54,7 @@ internal sealed class TranslationEngine
         string sourceLanguage = options.SelectedSourceLanguage;
         try
         {
-            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), recognizerPath, () => status(null),
+            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
                 async () =>
                 {
                     var server = await llamaStartup.WaitAsync(active);
@@ -76,6 +70,8 @@ internal sealed class TranslationEngine
 
         async Task<LocalServer> StartTranslation()
         {
+            var llamaPath = await Task.Run(() =>
+            BundledTranslationRuntime.Resolve(options.LlamaServer, "llama", "llama-server.exe"), token);
             bool custom = !string.IsNullOrWhiteSpace(options.LlamaServer) && Path.IsPathFullyQualified(options.LlamaServer) &&
                 File.Exists(options.LlamaServer);
             if (options.Compute != "cpu")

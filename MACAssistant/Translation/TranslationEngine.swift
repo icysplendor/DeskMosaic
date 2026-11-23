@@ -353,13 +353,13 @@ final class TranslationEngine {
         processes.removeAll()
     }
 
-    func run(options: TranslationOptions, status: @escaping (String?) -> Void,
+    func run(options: TranslationOptions, capturing: () -> Void, status: @escaping (String?) -> Void,
              caption: @escaping (TranslationCaption) -> Void, recordingSaved: ((URL) -> Void)? = nil) async throws {
         let diagnostic = options.diagnosticsEnabled ? (try? TranslationDiagnosticLog()) : nil
         diagnostic?.write("session_started source_language=\(options.selectedSourceLanguage) os=\(ProcessInfo.processInfo.operatingSystemVersionString)")
         defer { diagnostic?.write("session_ended") }
         do {
-            try await runSession(options: options, status: status, caption: caption,
+            try await runSession(options: options, capturing: capturing, status: status, caption: caption,
                                  recordingSaved: recordingSaved, diagnostic: diagnostic)
         } catch {
             if !Task.isCancelled { diagnostic?.failure("session_failed", error) }
@@ -367,7 +367,7 @@ final class TranslationEngine {
         }
     }
 
-    private func runSession(options: TranslationOptions, status: @escaping (String?) -> Void,
+    private func runSession(options: TranslationOptions, capturing: () -> Void, status: @escaping (String?) -> Void,
                             caption: @escaping (TranslationCaption) -> Void, recordingSaved: ((URL) -> Void)?,
                             diagnostic: TranslationDiagnosticLog?) async throws {
         guard options.microphone || options.systemAudio else {
@@ -424,7 +424,7 @@ final class TranslationEngine {
             var sessionError: Error?
             do {
                 try await recognition.run(options: options, model: model, archive: options.path(for: model),
-                                          record: recordingSaved != nil, ready: { status(nil) },
+                                          record: recordingSaved != nil, capturing: capturing, ready: { status(nil) },
                                           translationReady: translationReady, caption: caption, translate: translate, diagnostic: diagnostic)
             } catch { sessionError = error }
             if let saved = try await recognition.finishRecording() { recordingSaved?(saved) }

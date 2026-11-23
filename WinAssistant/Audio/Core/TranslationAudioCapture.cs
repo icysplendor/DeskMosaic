@@ -7,11 +7,11 @@ internal static class TranslationAudioCapture
     private const uint Loopback = 0x00020000;
     private const uint SilentBuffer = 2;
 
-    internal static Task Start(bool microphone, Action<float[], int> receive, Action tick, CancellationToken token) =>
-        Task.Factory.StartNew(() => Capture(microphone, receive, tick, token), token,
+    internal static Task Start(bool microphone, Action<float[], int> receive, Action tick, Action started, CancellationToken token) =>
+        Task.Factory.StartNew(() => Capture(microphone, receive, tick, started, token), token,
             TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-    private static void Capture(bool microphone, Action<float[], int> receive, Action tick, CancellationToken token)
+    private static void Capture(bool microphone, Action<float[], int> receive, Action tick, Action started, CancellationToken token)
     {
         var enumerator = (IMMDeviceEnumerator)(object)new MMDeviceEnumeratorComObject();
         object? endpoint = null;
@@ -47,6 +47,7 @@ internal static class TranslationAudioCapture
             var capture = (IAudioCaptureClient)captureObject;
             Check(client.Start());
             running = client;
+            started();
             while (!token.IsCancellationRequested)
             {
                 Check(capture.GetNextPacketSize(out var frames));

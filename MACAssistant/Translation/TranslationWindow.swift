@@ -127,7 +127,11 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             }
             let onSaved: ((URL) -> Void)? = record ? { self.savedRecording = $0 } : nil
             do {
-                try await engine.run(options: options, status: { backend in
+                try await engine.run(options: options, capturing: {
+                    self.listening = true
+                    self.status = record ? self.t("正在录音 · 加载模型…", "Recording · Loading models…") :
+                        self.t("正在采集 · 加载模型…", "Capturing audio · Loading models…")
+                }, status: { backend in
                     self.listening = true
                     let label: String
                     if twoWay {
@@ -411,25 +415,13 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running)
-            Button(controller.running ? t("停止", "Stop") : t("开始", "Start")) { controller.toggle() }
-                .buttonStyle(.borderedProminent)
-                .tint(controller.running ? stopAccent : accent)
+            sessionButton(controller.running ? t("停止", "Stop") : t("开始", "Start"),
+                          tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .padding(.leading, 4)
-            Button {
+            sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
                 controller.toggle(twoWay: true)
-            } label: {
-                Text(controller.twoWaySession ? t("互译中", "Two-way active") : t("互译", "Two-way"))
-                    .fontWeight(.semibold)
-                    .foregroundStyle(twoWayAccent)
-                    .padding(.horizontal, 9)
-                    .frame(minHeight: 24)
-                    .background(twoWayAccent.opacity(controller.twoWaySession ? 0.22 : 0.10),
-                                in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(twoWayAccent.opacity(0.25)))
             }
-            .buttonStyle(.plain)
             .disabled(!canStartTwoWay)
-            .opacity(canStartTwoWay || controller.twoWaySession ? 1 : 0.52)
             .help(twoWayHelp)
             Spacer(minLength: 8)
             HStack(spacing: 6) {
@@ -444,6 +436,16 @@ private struct TranslationWindowView: View {
             .help(controller.savedRecording?.path ?? controller.status)
             .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
         }
+    }
+
+    private func sessionButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .fontWeight(.semibold)
+                .frame(minWidth: 54)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tint)
     }
 
     private var twoWayHelp: String {
