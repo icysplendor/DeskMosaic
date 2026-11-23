@@ -297,7 +297,7 @@ final class StreamingRecognition {
             case "1": review = .unavailable
             case "S1": review = .modelPreparing
             case "S2": review = .modelFailed
-            case "S3": review = .noChinese
+            case "S3": review = .noReviewableText
             case "S4": review = .audioUnaligned
             case "S5": review = .outsideLimits
             case "S6": review = .queueFull

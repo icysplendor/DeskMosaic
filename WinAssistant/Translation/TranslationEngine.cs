@@ -11,7 +11,7 @@ namespace WinAssistant.Translation;
 internal enum CaptionReview
 {
     None, Pending, Kept, Revised, Disabled, ModelMissing, LanguageUnsupported,
-    ModelPreparing, ModelFailed, NoChinese, AudioUnaligned, OutsideLimits, QueueFull, Unavailable
+    ModelPreparing, ModelFailed, NoReviewableText, AudioUnaligned, OutsideLimits, QueueFull, Unavailable
 }
 
 internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None)

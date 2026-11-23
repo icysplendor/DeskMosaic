@@ -193,7 +193,7 @@ internal static class StreamingRecognition
                     "1" => CaptionReview.Unavailable,
                     "S1" => CaptionReview.ModelPreparing,
                     "S2" => CaptionReview.ModelFailed,
-                    "S3" => CaptionReview.NoChinese,
+                    "S3" => CaptionReview.NoReviewableText,
                     "S4" => CaptionReview.AudioUnaligned,
                     "S5" => CaptionReview.OutsideLimits,
                     "S6" => CaptionReview.QueueFull,

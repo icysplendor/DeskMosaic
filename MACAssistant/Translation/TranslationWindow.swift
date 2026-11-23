@@ -18,12 +18,14 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     @Published private(set) var failed = false
     @Published var sourceLanguage = "Chinese"
     @Published var targetLanguage = "English"
+    @Published var transcribeOnly = false
     private var window: NSWindow?
     private var job: Task<Void, Never>?
     private var engine: TranslationEngine?
 
     func show() {
-        if window?.isVisible != true {
+        if window?.isVisible != true && !running {
+            transcribeOnly = false
             let defaults = SettingsManager.shared.translationOptions
             sourceLanguage = defaults.selectedSourceLanguage
             targetLanguage = defaults.selectedTargetLanguage
@@ -69,7 +71,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     var canSwapLanguages: Bool {
         let options = SettingsManager.shared.translationOptions
-        return !running && !options.transcribeOnly && options.availableSourceLanguages.contains(targetLanguage) &&
+        return !running && !transcribeOnly && options.availableSourceLanguages.contains(targetLanguage) &&
             options.targetLanguages(for: targetLanguage).contains(sourceLanguage)
     }
 
@@ -85,6 +87,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         var options = SettingsManager.shared.translationOptions
         options.sourceLanguage = sourceLanguage
         options.targetLanguage = targetLanguage
+        options.transcribeOnly = transcribeOnly
         sourceOnlySession = options.transcribeOnly
         identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
@@ -272,7 +275,7 @@ private struct TranslationWindowView: View {
                     .help(t("原文字号", "Source size"))
                 fontSizePicker(t("译文", "Target"), settings.translationBinding(\.targetFontSize))
                     .help(t("译文字号", "Translation size"))
-                Toggle(t("保留原文", "Keep source"), isOn: settings.translationBinding(\.showSource))
+                Toggle(t("显示原文", "Show source"), isOn: settings.translationBinding(\.showSource))
                     .help(t("译文定稿后继续显示原文", "Keep the source visible after the translation is final"))
                 exportMenu
                 Button { controller.openSettings() } label: {
@@ -330,10 +333,10 @@ private struct TranslationWindowView: View {
                     }
                     .labelsHidden()
                     .frame(width: 110)
-                    .disabled(settings.translationOptions.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
+                    .disabled(controller.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
                 }
                 .disabled(controller.running)
-                Toggle(t("仅记录", "Transcribe only"), isOn: settings.translationBinding(\.transcribeOnly))
+                Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
                     .help(t("仅记录原文字幕", "Record source captions only"))
                     .toggleStyle(.switch)
                     .controlSize(.small)
@@ -421,7 +424,7 @@ private struct TranslationWindowView: View {
         case .languageUnsupported: t("未复核 · 源语言不支持", "Not reviewed · Unsupported source language")
         case .modelPreparing: t("未复核 · 模型正在准备", "Not reviewed · Model preparing")
         case .modelFailed: t("未复核 · 模型加载失败", "Not reviewed · Model failed to load")
-        case .noChinese: t("未复核 · 此段无中文", "Not reviewed · No Chinese in this passage")
+        case .noReviewableText: t("未复核 · 无可复核文字", "Not reviewed · No reviewable text")
         case .audioUnaligned: t("未复核 · 音频边界不明确", "Not reviewed · Unclear audio boundaries")
         case .outsideLimits: t("未复核 · 段落长度超出范围", "Not reviewed · Passage length out of range")
         case .queueFull: t("未复核 · 队列已满", "Not reviewed · Queue full")

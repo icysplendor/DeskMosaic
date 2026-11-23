@@ -20,6 +20,7 @@ public sealed class TranslationOptions
     public string MicrophonePause { get; set; } = "normal";
     public bool Microphone { get; set; }
     public bool SystemAudio { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore]
     public bool TranscribeOnly { get; set; }
     public bool ShowSource { get; set; } = true;
     public int SourceFontSize { get; set; } = 13;

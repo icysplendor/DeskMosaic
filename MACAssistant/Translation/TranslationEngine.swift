@@ -28,7 +28,7 @@ struct TranslationOptions: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case streamingModel, additionalStreamingModels, translationModel, onlineSpeakerModel, llamaServer, compute, sourceLanguage, targetLanguage
         case lmtTranslationModel, useLmtTranslation, correctionModel, enableCorrection, diagnosticsEnabled
-        case microphone, microphoneFilter, microphonePause, systemAudio, transcribeOnly, showSource, sourceFontSize, targetFontSize
+        case microphone, microphoneFilter, microphonePause, systemAudio, showSource, sourceFontSize, targetFontSize
     }
 
     init() {}
@@ -53,7 +53,6 @@ struct TranslationOptions: Codable, Equatable {
         microphonePause = try fields.decodeIfPresent(String.self, forKey: .microphonePause) ?? microphonePause
         microphone = try fields.decodeIfPresent(Bool.self, forKey: .microphone) ?? microphone
         systemAudio = try fields.decodeIfPresent(Bool.self, forKey: .systemAudio) ?? systemAudio
-        transcribeOnly = try fields.decodeIfPresent(Bool.self, forKey: .transcribeOnly) ?? transcribeOnly
         showSource = try fields.decodeIfPresent(Bool.self, forKey: .showSource) ?? showSource
         let sourceSize = try fields.decodeIfPresent(Int.self, forKey: .sourceFontSize) ?? sourceFontSize
         let targetSize = try fields.decodeIfPresent(Int.self, forKey: .targetFontSize) ?? targetFontSize
@@ -277,7 +276,7 @@ struct TranslationError: LocalizedError {
 
 enum CaptionReview {
     case pending, kept, revised, disabled, modelMissing, languageUnsupported
-    case modelPreparing, modelFailed, noChinese, audioUnaligned, outsideLimits, queueFull, unavailable
+    case modelPreparing, modelFailed, noReviewableText, audioUnaligned, outsideLimits, queueFull, unavailable
 }
 
 struct TranslationCaption: Identifiable, Equatable {

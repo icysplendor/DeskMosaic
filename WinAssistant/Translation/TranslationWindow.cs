@@ -101,7 +101,7 @@ internal sealed class TranslationWindow : Window
         start.Background = start.BorderBrush = Accent;
         start.Foreground = Brushes.White;
         showSource.Foreground = Foreground;
-        showSource.Content = T("保留原文", "Keep source");
+        showSource.Content = T("显示原文", "Show source");
         showSource.ToolTip = T("译文定稿后继续显示原文", "Keep the source visible after the translation is final");
         showSource.Margin = new Thickness(4, 0, 8, 0);
         var settings = new Button();
@@ -173,11 +173,7 @@ internal sealed class TranslationWindow : Window
         transcribeOnly.Foreground = Foreground;
         transcribeOnly.Content = T("仅记录", "Transcribe only");
         transcribeOnly.ToolTip = T("仅记录原文字幕", "Record source captions only");
-        transcribeOnly.Click += (_, _) =>
-        {
-            ConfigurationStore.Shared.Update(config => config.Translation.TranscribeOnly = transcribeOnly.IsChecked == true);
-            UpdateLanguageControls();
-        };
+        transcribeOnly.Click += (_, _) => UpdateLanguageControls();
         languages.Children.Add(transcribeOnly);
         start.Margin = new Thickness(10, 0, 0, 0);
         startRecording.Margin = new Thickness(10, 0, 0, 0);
@@ -284,9 +280,9 @@ internal sealed class TranslationWindow : Window
     {
         var options = ConfigurationStore.Shared.Configuration.Translation;
         showSource.IsChecked = options.ShowSource;
-        if (!IsVisible)
+        if (!IsVisible && session is null)
         {
-            transcribeOnly.IsChecked = options.TranscribeOnly;
+            transcribeOnly.IsChecked = false;
             FillLanguagePicker(sourceLanguage, options.AvailableSourceLanguages, options.SelectedSourceLanguage);
             FillLanguagePicker(targetLanguage, options.AvailableTargetLanguages, options.SelectedTargetLanguage);
             UpdateLanguageControls();
@@ -508,7 +504,7 @@ internal sealed class TranslationWindow : Window
                 CaptionReview.LanguageUnsupported => T("未复核 · 源语言不支持", "Not reviewed · Unsupported source language"),
                 CaptionReview.ModelPreparing => T("未复核 · 模型正在准备", "Not reviewed · Model preparing"),
                 CaptionReview.ModelFailed => T("未复核 · 模型加载失败", "Not reviewed · Model failed to load"),
-                CaptionReview.NoChinese => T("未复核 · 此段无中文", "Not reviewed · No Chinese in this passage"),
+                CaptionReview.NoReviewableText => T("未复核 · 无可复核文字", "Not reviewed · No reviewable text"),
                 CaptionReview.AudioUnaligned => T("未复核 · 音频边界不明确", "Not reviewed · Unclear audio boundaries"),
                 CaptionReview.OutsideLimits => T("未复核 · 段落长度超出范围", "Not reviewed · Passage length out of range"),
                 CaptionReview.QueueFull => T("未复核 · 队列已满", "Not reviewed · Queue full"),

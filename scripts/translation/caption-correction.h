@@ -56,8 +56,12 @@ typedef struct {
 } CaptionCorrection;
 #undef ONLINE_CORRECTION_API
 
+static int english_letter(unsigned char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
 static int protected_char(unsigned char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+  return english_letter(c) || (c >= '0' && c <= '9');
 }
 static unsigned char folded_ascii(unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c; }
 
@@ -91,6 +95,51 @@ static int chinese_caption(const char *text, size_t length) {
     at += width;
   }
   return 0;
+}
+
+static int reviewable_text(const char *text, size_t length) {
+  for (size_t i = 0; i < length; ++i)
+    if (english_letter((unsigned char)text[i])) return 1;
+  return chinese_caption(text, length);
+}
+
+static int accepts_english_revision(const char *original, const char *revision) {
+  const char *a = protected_token(original);
+  const char *b = protected_token(revision);
+  size_t words = 0;
+  int changed_word = 0;
+  // Accept punctuation and case changes. In a longer caption, the two passes
+  // may also disagree on one interior word. Protect numbers and both ends.
+  while (*a && *b) {
+    int equal = 1;
+    int letters_only = 1;
+    while (protected_char((unsigned char)*a) || protected_char((unsigned char)*b)) {
+      int has_a = protected_char((unsigned char)*a);
+      int has_b = protected_char((unsigned char)*b);
+      if (!has_a || !has_b || folded_ascii((unsigned char)*a) != folded_ascii((unsigned char)*b))
+        equal = 0;
+      if ((has_a && !english_letter((unsigned char)*a)) || (has_b && !english_letter((unsigned char)*b)))
+        letters_only = 0;
+      a += has_a;
+      b += has_b;
+    }
+    a = protected_token(a);
+    b = protected_token(b);
+    if (!equal) {
+      if (changed_word || !letters_only || !words || !*a || !*b) return 0;
+      changed_word = 1;
+    }
+    ++words;
+  }
+  return !*a && !*b && (!changed_word || words >= 5);
+}
+
+static int accepts_revision(const char *original, const char *revision) {
+  int original_chinese = chinese_caption(original, strlen(original));
+  int revision_chinese = chinese_caption(revision, strlen(revision));
+  if (original_chinese != revision_chinese) return 0;
+  return original_chinese ? preserves_words(original, revision)
+                          : accepts_english_revision(original, revision);
 }
 
 static int preserves_edges(const char *original, const char *revision) {
@@ -179,7 +228,7 @@ static DIAR_WORKER correction_worker(void *context) {
     const char *text = result && result->text ? result->text : "";
     // A slice cut during continuous speech can pick up a neighboring word.
     if (!*text || strpbrk(text, "\r\n\t") ||
-        !chinese_caption(text, strlen(text)) || !preserves_words(job->original, text) ||
+        !accepts_revision(job->original, text) ||
         (!job->isolated && !preserves_edges(job->original, text))) text = "";
     emit_caption(job->source, stream ? 'R' : 'E', job->id, job->speaker, job->range, text, strlen(text));
     fflush(stdout);
@@ -303,7 +352,7 @@ static void correction_report_preparation(CaptionCorrection *correction, int rea
 
 // S events identify why a finalized caption could not enter the review queue.
 enum CorrectionSkip {
-  CorrectionQueued = 0, CorrectionModelFailed = 2, CorrectionNoChinese,
+  CorrectionQueued = 0, CorrectionModelFailed = 2, CorrectionNoReviewableText,
   CorrectionAudioUnaligned, CorrectionOutsideLimits, CorrectionQueueFull
 };
 
@@ -311,7 +360,7 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
                             const char *text, size_t length, CaptionRange range, CaptionRange audio_range, int isolated) {
   double begin = audio_range.start, end = audio_range.end;
   if (!correction->started) return CorrectionModelFailed;
-  if (!chinese_caption(text, length)) return CorrectionNoChinese;
+  if (!reviewable_text(text, length)) return CorrectionNoReviewableText;
   if (end <= begin) return CorrectionAudioUnaligned;
   if (length >= CorrectionTextBytes || end - begin > CorrectionMaxSeconds || end - begin < 0.6)
     return CorrectionOutsideLimits;
