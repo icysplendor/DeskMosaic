@@ -52,6 +52,7 @@ internal sealed class TranslationWindow : Window
     private bool identifiesSpeakers;
     private bool sourceOnlySession;
     private bool listening;
+    private bool speechReady;
     private bool twoWaySession;
     private int clearedThroughCaption;
 
@@ -287,7 +288,7 @@ internal sealed class TranslationWindow : Window
         status.ToolTip = statusIndicator.ToolTip = details ?? text;
         AutomationProperties.SetName(statusIndicator, text);
         if (captions.Children.Count == 0)
-            empty.Text = listening ? T("等待语音…", "Waiting for speech…") : text;
+            empty.Text = speechReady && listening ? T("等待语音…", "Waiting for speech…") : text;
     }
 
     private static Brush ColorBrush(string hex) => (Brush)new BrushConverter().ConvertFromString(hex)!;
@@ -408,15 +409,15 @@ internal sealed class TranslationWindow : Window
                 ? (record ? T("互译并录音", "Two-way + recording") : T("正在互译", "Translating both ways"))
                 : record ? T("正在录音", "Recording") :
                     sourceOnlySession ? T("正在记录原文", "Transcribing") : T("正在监听", "Listening");
-            bool recognizing = false;
+            speechReady = false;
             await Task.Run(() => new TranslationEngine().RunAsync(options, () => PostCaption(() =>
             {
-                if (!recognizing)
+                if (!speechReady)
                     SetStatus(record ? T("正在录音 · 加载模型…", "Recording · Loading models…") :
                         T("正在采集 · 加载模型…", "Capturing audio · Loading models…"), listening: true);
             }), backend => PostCaption(() =>
             {
-                recognizing = true;
+                speechReady = true;
                 SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
             }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved));
         }
@@ -583,7 +584,7 @@ internal sealed class TranslationWindow : Window
         visibleRows.Clear();
         clear.IsEnabled = export.IsEnabled = false;
         latest = null;
-        empty.Text = listening ? T("等待语音…", "Waiting for speech…") : status.Text;
+        empty.Text = speechReady && listening ? T("等待语音…", "Waiting for speech…") : status.Text;
         empty.Visibility = Visibility.Visible;
         history.ScrollToHome();
     }

@@ -212,6 +212,7 @@ static DIAR_WORKER diar_work(void *context) {
     if (!diar->head) diar->tail = NULL;
     --diar->queued;
     diar->queued_seconds -= packet->count / (double)packet->rate;
+    diar_signal(&diar->event);
     diar_unlock(&diar->lock);
     DiarInput *input = &diar->inputs[packet->source];
     if (packet->gap) input->gap = (DiarGap){input->fed, packet->gap};
@@ -237,6 +238,7 @@ static DIAR_WORKER diar_work(void *context) {
     if (!success) {
       diar_lock(&diar->lock);
       diar->failed = 1;
+      diar_signal(&diar->event);
       diar_unlock(&diar->lock);
     }
   }
@@ -294,7 +296,11 @@ static void diar_enqueue(Diarizer *diar, uint32_t source, uint32_t rate, uint32_
     memcpy(packet->samples, samples, bytes);
   }
   diar_lock(&diar->lock);
-  if (!packet || diar->queued == MaxDiarPackets || diar->queued_seconds >= 6.0) diar->failed = 1;
+  if (!packet) diar->failed = 1;
+  // Startup replay can arrive faster than the speaker model can run. Let the
+  // app's bounded audio queue absorb that burst through pipe backpressure.
+  while (!diar->failed && (diar->queued == MaxDiarPackets || diar->queued_seconds >= 6.0))
+    diar_wait(&diar->event, &diar->lock);
   if (diar->failed) {
     free(packet);
   } else {

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using System.Text;
 
 namespace WinAssistant.Translation;
 
@@ -63,7 +64,8 @@ internal sealed class TranslationRecording
             if (!await queued.MoveNextAsync()) return;
             var info = new ProcessStartInfo(await executable.WaitAsync(token))
             {
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
+                StandardInputEncoding = new UTF8Encoding(false)
             };
             info.ArgumentList.Add("--record");
             info.ArgumentList.Add(stereo ? "2" : "1");

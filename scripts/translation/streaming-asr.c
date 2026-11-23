@@ -45,7 +45,7 @@ typedef struct {
   float *preroll;
   size_t count;
   size_t capacity;
-  int active;
+  int active, input_detected;
   double quiet;
   double received, signal_start, last_signal;
   double stream_origin;
@@ -255,6 +255,13 @@ int main(int argc, char **argv) {
   int status = 0;
   while (fread(header, sizeof(uint32_t), 3, stdin) == 3) {
     uint32_t source = header[0], rate = header[1], count = header[2];
+    // This marker follows every packet already queued when recognition became ready.
+    if (source == UINT32_MAX && rate == 2 && count == 0) {
+      printf("A\tstartup_replayed system_ms=%.0f microphone_ms=%.0f\n",
+             activity[0].received * 1000, activity[1].received * 1000);
+      fflush(stdout);
+      continue;
+    }
     // Model preparation reports success or failure through the audio pipe.
     if (source == UINT32_MAX && count == 0 && rate <= 1 && correction.directory) {
       if (!correction.preparationReported)
@@ -263,10 +270,19 @@ int main(int argc, char **argv) {
       continue;
     }
     if (source > 1 || rate < 8000 || rate > 384000 || count == 0 || count > sizeof(samples) / sizeof(samples[0]) ||
-        fread(samples, sizeof(float), count, stdin) != count) break;
+        fread(samples, sizeof(float), count, stdin) != count) {
+      puts("A\tinvalid_audio_packet");
+      fflush(stdout);
+      status = 5;
+      break;
+    }
     const SherpaOnnxOnlineStream *stream = streams[source];
     AudioActivity *audio = &activity[source];
     double packet_start = audio->received;
+    if (packet_start == 0) {
+      printf("A\tfirst_packet source=%u sample_rate=%u\n", source, rate);
+      fflush(stdout);
+    }
     audio->received += count / (double)rate;
     if (correction.started && !correction.preparationReported && packet_start >= next_correction_check[source]) {
       if (correction_files_ready(&correction, 0)) correction_report_preparation(&correction, 1);
@@ -278,10 +294,19 @@ int main(int argc, char **argv) {
     }
     correction_audio(&correction, source, rate, samples, count, packet_start);
     int has_signal = has_input(samples, count);
+    if (has_signal && !audio->input_detected) {
+      audio->input_detected = 1;
+      printf("A\tfirst_signal source=%u offset_ms=%.0f\n", source, packet_start * 1000);
+      fflush(stdout);
+    }
     int use_microphone_vad = source == 1 && microphone_vad.detector;
     if (use_microphone_vad)
       has_signal = microphone_vad_detect(&microphone_vad, rate, samples, count, has_signal);
     if (has_signal) {
+      if (audio->last_signal == 0 && use_microphone_vad) {
+        printf("A\tfirst_microphone_speech offset_ms=%.0f\n", packet_start * 1000);
+        fflush(stdout);
+      }
       if (audio->last_signal == 0 || packet_start - audio->last_signal >= 0.65)
         audio->signal_start = packet_start;
       audio->last_signal = audio->received;

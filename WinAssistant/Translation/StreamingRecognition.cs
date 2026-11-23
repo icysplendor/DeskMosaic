@@ -34,7 +34,14 @@ internal static class StreamingRecognition
         TranslationCaption? draftInput = null;
         bool draftHasOutput = false;
         var id = 0;
-        var runtime = Task.Run(() => BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe"));
+        var captureReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runtime = ResolveRuntime();
+
+        async Task<string> ResolveRuntime()
+        {
+            await captureReady.Task;
+            return await Task.Run(() => BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe"));
+        }
         var recording = recordingSaved is null ? null : new TranslationRecording(runtime, options.SystemAudio && options.Microphone);
         Task? recognition = null;
         try
@@ -47,6 +54,7 @@ internal static class StreamingRecognition
         finally
         {
             session.Cancel();
+            captureReady.TrySetCanceled(active);
             try { await Task.WhenAll(recognition is null ? captures : captures.Append(recognition)); }
             catch (Exception) { /* The first failure is already reported above. */ }
             frames.Complete();
@@ -94,6 +102,11 @@ internal static class StreamingRecognition
             }
 
             Log("fast_engine_ready");
+            var replayBoundary = new byte[12];
+            BinaryPrimitives.WriteUInt32LittleEndian(replayBoundary, uint.MaxValue);
+            BinaryPrimitives.WriteUInt32LittleEndian(replayBoundary.AsSpan(4), 2);
+            if (!frames.TryAppend(replayBoundary, replayBoundary.Length))
+                throw new InvalidOperationException("暂存音频已满，语音识别跟不上。 / The audio buffer is full; recognition could not keep up.");
             ready();
             var workers = new List<Task> { WriteAudio(helper), Recognize(helper) };
             Task? correctionPreparation = correctParagraphs ? Task.Run(PrepareCorrection) : null;
@@ -161,7 +174,12 @@ internal static class StreamingRecognition
                 Enqueue(new float[rate / 10]);
             }, () =>
             {
-                if (Interlocked.Exchange(ref captureStarted, 1) == 0) capturing();
+                Log($"audio_capture_ready source={(microphone ? "microphone" : "system")}");
+                if (Interlocked.Exchange(ref captureStarted, 1) == 0)
+                {
+                    capturing();
+                    captureReady.TrySetResult();
+                }
             }, active));
 
             void Enqueue(float[] samples)
@@ -192,6 +210,13 @@ internal static class StreamingRecognition
         {
             while (await helper.StandardOutput.ReadLineAsync(active) is { } line)
             {
+                if (line.StartsWith("A\t", StringComparison.Ordinal))
+                {
+                    Log($"audio_{line[2..]}");
+                    if (line == "A\tinvalid_audio_packet")
+                        throw new InvalidDataException("识别引擎收到无效音频。 / The recognition engine received invalid audio.");
+                    continue;
+                }
                 if (line.StartsWith("D\t", StringComparison.Ordinal))
                 {
                     Log($"review_{line[2..]}");
@@ -490,7 +515,12 @@ internal static class StreamingRecognition
             WorkingDirectory = workingDirectory, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = pipes, RedirectStandardOutput = pipes
         };
-        if (pipes) info.StandardOutputEncoding = Encoding.UTF8;
+        if (pipes)
+        {
+            // stdin carries binary PCM headers. StreamWriter must emit no encoding preamble.
+            info.StandardInputEncoding = new UTF8Encoding(false);
+            info.StandardOutputEncoding = Encoding.UTF8;
+        }
         // The Win32 environment preserves Unicode even if the process uses a legacy command-line code page.
         if (OperatingSystem.IsWindows() && correctionDirectory is not null)
             info.Environment["WINASSISTANT_REVIEW_MODEL_DIR"] = correctionDirectory;

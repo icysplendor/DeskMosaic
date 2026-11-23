@@ -10,6 +10,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     @Published private(set) var captions: [TranslationCaption] = []
     @Published private(set) var running = false
     @Published private(set) var listening = false
+    @Published private(set) var speechReady = false
     @Published private(set) var recording = false
     @Published private(set) var sourceOnlySession = false
     @Published private(set) var twoWaySession = false
@@ -113,6 +114,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                 job = nil
                 running = false
                 listening = false
+                speechReady = false
                 recording = false
                 twoWaySession = false
                 if savedRecording != nil && !failed { status = t("录音已保存", "Recording saved") }
@@ -133,6 +135,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                         self.t("正在采集 · 加载模型…", "Capturing audio · Loading models…")
                 }, status: { backend in
                     self.listening = true
+                    self.speechReady = true
                     let label: String
                     if twoWay {
                         label = record ? self.t("互译并录音", "Two-way + recording") : self.t("正在互译", "Translating both ways")
@@ -345,7 +348,7 @@ private struct TranslationWindowView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line).allowsHitTesting(false))
             .overlay(alignment: controller.captions.isEmpty ? .center : .topLeading) {
                 if controller.captions.isEmpty || controller.failed {
-                    Text(controller.listening ? t("等待语音…", "Waiting for speech…")
+                    Text(controller.speechReady ? t("等待语音…", "Waiting for speech…")
                          : (controller.status.isEmpty ? t("字幕会显示在这里", "Captions appear here") : controller.status))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)

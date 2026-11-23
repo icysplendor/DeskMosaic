@@ -49,12 +49,17 @@ internal sealed class TranslationEngine
         var active = session.Token;
         var key = Guid.NewGuid().ToString("N");
         using var http = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false });
+        var captureReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var llamaStartup = StartTranslation();
         string selectedTarget = options.SelectedTargetLanguage;
         string sourceLanguage = options.SelectedSourceLanguage;
         try
         {
-            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
+            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), () =>
+                {
+                    capturing();
+                    captureReady.TrySetResult();
+                }, () => status(null),
                 async () =>
                 {
                     var server = await llamaStartup.WaitAsync(active);
@@ -70,8 +75,9 @@ internal sealed class TranslationEngine
 
         async Task<LocalServer> StartTranslation()
         {
+            await captureReady.Task.WaitAsync(active);
             var llamaPath = await Task.Run(() =>
-            BundledTranslationRuntime.Resolve(options.LlamaServer, "llama", "llama-server.exe"), token);
+                BundledTranslationRuntime.Resolve(options.LlamaServer, "llama", "llama-server.exe"), active);
             bool custom = !string.IsNullOrWhiteSpace(options.LlamaServer) && Path.IsPathFullyQualified(options.LlamaServer) &&
                 File.Exists(options.LlamaServer);
             if (options.Compute != "cpu")

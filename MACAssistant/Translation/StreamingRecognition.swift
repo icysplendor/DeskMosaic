@@ -148,6 +148,10 @@ final class StreamingRecognition {
         }
         deadline.cancel()
         diagnostic?.write("fast_engine_ready")
+        let replayBoundary: [UInt32] = [.max, 2, 0]
+        guard audio.append(replayBoundary.withUnsafeBytes { Data($0) }) else {
+            throw TranslationError("暂存音频已满，语音识别跟不上。", "The audio buffer is full; recognition could not keep up.")
+        }
 
         let correctionPreparation = Task.detached(priority: .utility) {
             guard correctParagraphs else { return }
@@ -266,6 +270,13 @@ final class StreamingRecognition {
 
         while let line = try await received.next() {
             try Task.checkCancellation()
+            if line.hasPrefix("A\t") {
+                diagnostic?.write("audio_\(line.dropFirst(2))")
+                if line == "A\tinvalid_audio_packet" {
+                    throw TranslationError("识别引擎收到无效音频。", "The recognition engine received invalid audio.")
+                }
+                continue
+            }
             if line.hasPrefix("D\t") {
                 diagnostic?.write("review_\(line.dropFirst(2))")
                 continue

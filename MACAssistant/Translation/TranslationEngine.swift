@@ -383,7 +383,7 @@ final class TranslationEngine {
         streamingRecognition = recognition
         defer { stop() }
         if options.transcribeOnly {
-            try await runRecognition(translationReady: nil, translate: nil)
+            try await runRecognition(captureStarted: capturing, translationReady: nil, translate: nil)
             return
         }
 
@@ -393,9 +393,6 @@ final class TranslationEngine {
             throw TranslationError("请在录写/翻译设置中下载或选择当前的文本翻译模型。",
                                    "Install the selected text translation model in Transcribe / Translate settings.")
         }
-        diagnostic?.write("translation_executable_resolving")
-        let llamaPath = try executable(options.llamaServer, named: "llama-server", fallbackName: "llama")
-        let llamaCommand = URL(fileURLWithPath: llamaPath).lastPathComponent == "llama" ? ["serve"] : []
         let key = UUID().uuidString
         let settings = URLSessionConfiguration.ephemeral
         settings.connectionProxyDictionary = [:]
@@ -404,27 +401,34 @@ final class TranslationEngine {
         defer { http.invalidateAndCancel() }
 
         let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/llama-server").path
-        let llamaStartup = Task {
-            try await startServer(http, path: llamaPath, model: translationModel,
-                arguments: ["--api-key", key, "--ctx-size", "1024", "--parallel", "1", "--no-webui", "--poll", "0"],
-                useBundledMetal: llamaPath == bundled, mode: options.compute, command: llamaCommand, diagnostic: diagnostic)
-        }
-        defer { llamaStartup.cancel() }
+        var llamaStartup: Task<(url: String, backend: String), Error>?
+        defer { llamaStartup?.cancel() }
 
         let selectedTarget = options.selectedTargetLanguage
         let sourceLanguage = options.selectedSourceLanguage
-        try await runRecognition(translationReady: {
+        try await runRecognition(captureStarted: {
+            capturing()
+            llamaStartup = Task {
+                diagnostic?.write("translation_executable_resolving")
+                let llamaPath = try executable(options.llamaServer, named: "llama-server", fallbackName: "llama")
+                let llamaCommand = URL(fileURLWithPath: llamaPath).lastPathComponent == "llama" ? ["serve"] : []
+                return try await startServer(http, path: llamaPath, model: translationModel,
+                    arguments: ["--api-key", key, "--ctx-size", "1024", "--parallel", "1", "--no-webui", "--poll", "0"],
+                    useBundledMetal: llamaPath == bundled, mode: options.compute, command: llamaCommand, diagnostic: diagnostic)
+            }
+        }, translationReady: {
+            guard let llamaStartup else { throw CancellationError() }
             let server = try await llamaStartup.value
             try Task.checkCancellation()
             status(server.backend)
         }, translate: translateText)
 
-        func runRecognition(translationReady: (() async throws -> Void)?,
+        func runRecognition(captureStarted: () -> Void, translationReady: (() async throws -> Void)?,
                             translate: StreamingRecognition.Translate?) async throws {
             var sessionError: Error?
             do {
                 try await recognition.run(options: options, model: model, archive: options.path(for: model),
-                                          record: recordingSaved != nil, capturing: capturing, ready: { status(nil) },
+                                          record: recordingSaved != nil, capturing: captureStarted, ready: { status(nil) },
                                           translationReady: translationReady, caption: caption, translate: translate, diagnostic: diagnostic)
             } catch { sessionError = error }
             if let saved = try await recognition.finishRecording() { recordingSaved?(saved) }
