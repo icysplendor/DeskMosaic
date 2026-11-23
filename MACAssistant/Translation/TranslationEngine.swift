@@ -454,6 +454,7 @@ final class TranslationEngine {
                 instruction = "Translate the following text from \(inputLanguage) into \(target):\n\(inputLanguage): \(source)\n\(target):"
             }
 
+            guard let llamaStartup else { throw CancellationError() }
             let llama = try await llamaStartup.value
             try Task.checkCancellation()
             var prompt = URLRequest(url: URL(string: llama.url + "/v1/chat/completions")!)

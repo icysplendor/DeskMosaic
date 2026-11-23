@@ -55,14 +55,20 @@ static int paragraph_sentence_end(const char *text, size_t index, uint32_t code)
 }
 
 static size_t paragraph_boundary(const char *text, size_t stable) {
-  enum { PreferSentenceAfter = 128, AllowClauseAfter = 232, ReadingLimit = 320 };
-  size_t units = 0, clause = 0, word = 0, index = 0;
+  // East Asian characters use two reading units. Preserve the streaming tail
+  // until a new boundary arrives after the corresponding length threshold.
+  enum { PreferSentenceAfter = 160, AllowClauseAfter = 240, ReadingLimit = 380, MaxFallbackLookback = 32 };
+  size_t units = 0, word = 0, word_units = 0, index = 0;
   while (index < stable) {
     size_t width;
     uint32_t code = paragraph_char(text + index, stable - index, &width);
     units += paragraph_cjk(code) ? 2 : 1;
     size_t end = index + width;
-    if (units >= PreferSentenceAfter && paragraph_sentence_end(text, index, code)) {
+    int clause = code == ',' || code == ';' || code == 0xff0c || code == 0xff1b;
+    if (code == ',' && index > 0 && isdigit((unsigned char)text[index - 1]) &&
+        isdigit((unsigned char)text[end])) clause = 0;
+    if ((units >= PreferSentenceAfter && paragraph_sentence_end(text, index, code)) ||
+        (units >= AllowClauseAfter && clause)) {
       // Keep closing quotes and brackets with the sentence they close.
       while (end < stable) {
         size_t closing_width;
@@ -75,16 +81,15 @@ static size_t paragraph_boundary(const char *text, size_t stable) {
       }
       return end;
     }
-    if (units >= PreferSentenceAfter) {
-      if (code == ' ' || paragraph_cjk(code)) word = end;
-      if (code == ',' || code == ';' || code == ':' ||
-          code == 0xff0c || code == 0xff1b || code == 0xff1a || code == 0x3001)
-        clause = end;
+    if (code == ' ' || paragraph_cjk(code)) {
+      word = end;
+      word_units = units;
     }
-    if (units >= ReadingLimit) return clause ? clause : (word ? word : end);
+    if (units >= ReadingLimit)
+      return word && units - word_units <= MaxFallbackLookback ? word : end;
     index = end;
   }
-  return units >= AllowClauseAfter ? clause : 0;
+  return 0;
 }
 
 static const char *caption_separator(const char *previous, size_t length, const char *next) {
