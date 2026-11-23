@@ -207,10 +207,14 @@ final class StreamingRecognition {
             while !Task.isCancelled {
                 if !pendingFinals.isEmpty {
                     var final = pendingFinals.removeFirst()
-                    final.translation = try await translateSafely(final.source, provisional: false) { _ in }
-                    final.translationFinal = true
+                    let translation = try await translateSafely(final.source, provisional: false) { _ in }
                     try Task.checkCancellation()
-                    caption(final)
+                    // On failure the visible preview stays provisional.
+                    if !translation.isEmpty || (final.translation ?? "").isEmpty {
+                        final.translation = translation
+                        final.translationFinal = true
+                        caption(final)
+                    }
                     continue
                 }
                 let now = ProcessInfo.processInfo.systemUptime
@@ -343,10 +347,9 @@ final class StreamingRecognition {
                   final || source != previous?.source || speakerID != previous?.speakerID ||
                     startMs != previous?.startMs || endMs != previous?.endMs else { continue }
             if previous == nil { nextID += 1 }
-            // A speaker change can move the tail of the draft to a new paragraph.
-            let translation = final && source.count < (previous?.source.count ?? 0) ? nil : previous?.translation
+            // A shorter final source still uses the visible preview until its replacement arrives.
             let item = TranslationCaption(id: previous?.id ?? nextID, microphone: index == 1, source: source,
-                                          translation: translation, sourceFinal: final, translationFinal: false, speakerID: speakerID,
+                                          translation: previous?.translation, sourceFinal: final, translationFinal: false, speakerID: speakerID,
                                           startMs: startMs, endMs: endMs, review: review)
             drafts[index] = final ? nil : item
             if let review { diagnostic?.write("paragraph id=\(item.id) range_ms=\(startMs)-\(endMs) review=\(review)") }
@@ -366,9 +369,11 @@ final class StreamingRecognition {
         func queueFinal(_ item: TranslationCaption) {
             if pendingFinals.count == 256 {
                 var dropped = pendingFinals.removeFirst()
-                dropped.translation = ""
-                dropped.translationFinal = true
-                caption(dropped)
+                if (dropped.translation ?? "").isEmpty {
+                    dropped.translation = ""
+                    dropped.translationFinal = true
+                    caption(dropped)
+                }
             }
             pendingFinals.append(item)
             draftRequest?.cancel()

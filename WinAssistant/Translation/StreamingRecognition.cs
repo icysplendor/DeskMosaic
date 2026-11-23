@@ -270,11 +270,9 @@ internal static class StreamingRecognition
                     var previous = drafts[sourceIndex];
                     if (!source.Any(char.IsLetterOrDigit) || (!final && source == previous?.Source &&
                         speakerId == previous?.SpeakerId && startMs == previous?.StartMs && endMs == previous?.EndMs)) continue;
-                    // A speaker change can move the tail of the draft to a new paragraph.
-                    var translation = final && previous is not null && source.Length < previous.Source.Length
-                        ? null : previous?.Translation;
+                    // A shorter final source still uses the visible preview until its replacement arrives.
                     var item = new TranslationCaption(previous?.Id ?? ++id, sourceIndex == 1, source,
-                        translation, final, false, speakerId, startMs, endMs,
+                        previous?.Translation, final, false, speakerId, startMs, endMs,
                         review);
                     drafts[sourceIndex] = final ? null : item;
                     if (final) Log($"paragraph id={item.Id} range_ms={startMs}-{endMs} review={item.Review}");
@@ -298,7 +296,12 @@ internal static class StreamingRecognition
 
         void QueueFinal(TranslationCaption item)
         {
-            if (pendingFinals.Count == 256) caption(pendingFinals.Dequeue() with { Translation = "", TranslationFinal = true });
+            if (pendingFinals.Count == 256)
+            {
+                var dropped = pendingFinals.Dequeue();
+                if (string.IsNullOrEmpty(dropped.Translation))
+                    caption(dropped with { Translation = "", TranslationFinal = true });
+            }
             pendingFinals.Enqueue(item);
             draftRequest?.Cancel();
         }
@@ -344,7 +347,9 @@ internal static class StreamingRecognition
                 {
                     string translation = await TranslateSafely(final.Source, provisional: false, _ => { }, active);
                     active.ThrowIfCancellationRequested();
-                    lock (state) caption(final with { Translation = translation, TranslationFinal = true });
+                    // On failure the visible preview stays provisional.
+                    if (translation.Length != 0 || string.IsNullOrEmpty(final.Translation))
+                        lock (state) caption(final with { Translation = translation, TranslationFinal = true });
                     continue;
                 }
 
