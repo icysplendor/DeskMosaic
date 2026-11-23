@@ -206,13 +206,7 @@ final class StreamingRecognition {
             while !Task.isCancelled {
                 if !pendingFinals.isEmpty {
                     var final = pendingFinals.removeFirst()
-                    let pending = final
-                    final.translation = try await translateSafely(pending.source, provisional: false) { text in
-                        guard !text.isEmpty, text.count >= (pending.translation?.count ?? 0) else { return }
-                        var current = pending
-                        current.translation = text
-                        caption(current)
-                    }
+                    final.translation = try await translateSafely(final.source, provisional: false) { _ in }
                     final.translationFinal = true
                     try Task.checkCancellation()
                     caption(final)
@@ -249,10 +243,16 @@ final class StreamingRecognition {
 
                 @MainActor func preview(_ text: String, complete: Bool) {
                     guard !Task.isCancelled, var latest = drafts[index], latest.id == request.id, !text.isEmpty else { return }
-                    if latest.translation != text, complete || latest.translation.map({ text.count >= $0.count }) != false {
-                        latest.translation = text
-                        drafts[index] = latest
-                        caption(latest)
+                    // A provisional stop may disappear as the sentence continues.
+                    // Leave it out of the preview so it cannot block a matching extension.
+                    if let end = text.lastIndex(where: { !" ，。！？；：、,.!?;:…".contains($0) }) {
+                        let previewText = text[...end]
+                        let visible = latest.translation ?? ""
+                        if previewText.count > visible.count, previewText.hasPrefix(visible) {
+                            latest.translation = String(previewText)
+                            drafts[index] = latest
+                            caption(latest)
+                        }
                     }
                     draftHasOutput = true
                     if !complete { cancelStaleDraft(latest) }
@@ -291,7 +291,6 @@ final class StreamingRecognition {
                 if source.contains(where: { $0.isLetter || $0.isNumber }) {
                     if source != corrected.source {
                         corrected.source = source
-                        corrected.translation = nil
                         corrected.review = .revised
                     }
                     corrected.startMs = startMs

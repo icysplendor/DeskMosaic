@@ -260,8 +260,7 @@ internal static class StreamingRecognition
                                 revised ? CaptionReview.Revised : CaptionReview.Kept
                         };
                         if (accepted)
-                            corrected = corrected with { Source = source, StartMs = startMs, EndMs = endMs,
-                                Translation = revised ? null : original.Translation };
+                            corrected = corrected with { Source = source, StartMs = startMs, EndMs = endMs };
                         Log($"paragraph id={corrected.Id} range_ms={startMs}-{endMs} review={corrected.Review}");
                         caption(corrected);
                         if (translationReady is not null) QueueFinal(corrected);
@@ -342,11 +341,7 @@ internal static class StreamingRecognition
                 }
                 if (final is not null)
                 {
-                    string translation = await TranslateSafely(final.Source, provisional: false, text =>
-                    {
-                        if (text.Length == 0 || text.Length < (final.Translation?.Length ?? 0)) return;
-                        lock (state) caption(final with { Translation = text });
-                    }, active);
+                    string translation = await TranslateSafely(final.Source, provisional: false, _ => { }, active);
                     active.ThrowIfCancellationRequested();
                     lock (state) caption(final with { Translation = translation, TranslationFinal = true });
                     continue;
@@ -382,11 +377,15 @@ internal static class StreamingRecognition
                     lock (state)
                     {
                         if (drafts[chosen] is not { } current || current.Id != request.Id) return;
-                        if (current.Translation != text &&
-                            (complete || string.IsNullOrEmpty(current.Translation) || text.Length >= current.Translation.Length))
+                        // A provisional stop may disappear as the sentence continues.
+                        // Leave it out of the preview so it cannot block a matching extension.
+                        int length = text.AsSpan().TrimEnd(" ，。！？；：、,.!?;:…").Length;
+                        string visible = current.Translation ?? "";
+                        if (length > visible.Length && text.StartsWith(visible, StringComparison.Ordinal))
                         {
-                            drafts[chosen] = current with { Translation = text };
-                            caption(drafts[chosen]!);
+                            var updated = current with { Translation = text[..length] };
+                            drafts[chosen] = updated;
+                            caption(updated);
                         }
                         draftHasOutput = true;
                         if (!complete) CancelStaleDraft(current);
