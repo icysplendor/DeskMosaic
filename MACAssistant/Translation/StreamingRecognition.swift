@@ -202,6 +202,7 @@ final class StreamingRecognition {
             }
             var updated = updates.makeAsyncIterator()
             var submitted = [TranslationCaption?](repeating: nil, count: 2)
+            var completed = [TranslationCaption?](repeating: nil, count: 2)
             var lastRequest = [Double](repeating: -1, count: 2)
             while !Task.isCancelled {
                 if !pendingFinals.isEmpty {
@@ -227,11 +228,25 @@ final class StreamingRecognition {
                     continue
                 }
                 guard let request = drafts[index] else { continue }
+                var anchor = completed[index]
+                var source = request.source
+                if let saved = anchor, saved.id == request.id, source.hasPrefix(saved.source) {
+                    let remainder = source.dropFirst(saved.source.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Keep a row in one language when a new clause changes the two-way direction.
+                    if !remainder.isEmpty, !options.twoWay || ChineseEnglishSource.detect(remainder) == ChineseEnglishSource.detect(saved.source) {
+                        source = remainder
+                    } else {
+                        anchor = nil
+                    }
+                } else {
+                    anchor = nil
+                }
+                completed[index] = anchor
                 lastRequest[index] = now
                 draftInput = (request.id, request.source)
                 draftHasOutput = false
                 let job = Task {
-                    try await translateSafely(request.source, provisional: true) { preview($0, complete: false) }
+                    try await translateSafely(source, provisional: true) { preview($0, complete: false) }
                 }
                 draftRequest = job
                 let result = (try? await job.value) ?? ""
@@ -243,16 +258,22 @@ final class StreamingRecognition {
 
                 @MainActor func preview(_ text: String, complete: Bool) {
                     guard !Task.isCancelled, var latest = drafts[index], latest.id == request.id, !text.isEmpty else { return }
-                    // A provisional stop may disappear as the sentence continues.
-                    // Leave it out of the preview so it cannot block a matching extension.
-                    if let end = text.lastIndex(where: { !" ，。！？；：、,.!?;:…".contains($0) }) {
-                        let previewText = text[...end]
-                        let visible = latest.translation ?? ""
-                        if previewText.count > visible.count, previewText.hasPrefix(visible) {
-                            latest.translation = String(previewText)
-                            drafts[index] = latest
-                            caption(latest)
-                        }
+                    guard Self.stillRepresentsSource(request.source, latest.source) else { return }
+                    var previewText = text
+                    if let prefix = anchor?.translation, let last = prefix.last {
+                        previewText = prefix + ("。！？".contains(last) ? "" : " ") + text
+                    }
+                    let visible = latest.translation ?? ""
+                    // Publish a rephrased open sentence once, after its preview finishes.
+                    if previewText != visible, complete || previewText.hasPrefix(visible) {
+                        latest.translation = previewText
+                        drafts[index] = latest
+                        caption(latest)
+                    }
+                    if complete, Self.endsSentence(request.source), Self.endsSentence(previewText) {
+                        var saved = request
+                        saved.translation = previewText
+                        completed[index] = saved
                     }
                     draftHasOutput = true
                     if !complete { cancelStaleDraft(latest) }
@@ -356,7 +377,7 @@ final class StreamingRecognition {
         func cancelStaleDraft(_ current: TranslationCaption) {
             guard draftHasOutput, let input = draftInput, current.id == input.id else { return }
             let minimumGrowth = input.source.contains { $0.isLetter && !$0.isASCII } ? 4 : 12
-            if current.source.count - input.source.count >= minimumGrowth {
+            if !Self.endsSentence(input.source), current.source.count - input.source.count >= minimumGrowth {
                 draftRequest?.cancel()
             }
         }
@@ -369,6 +390,22 @@ final class StreamingRecognition {
                 return ""
             }
         }
+    }
+
+    private static func stillRepresentsSource(_ input: String, _ current: String) -> Bool {
+        guard current.hasPrefix(input), let last = input.last else { return false }
+        guard let next = current.dropFirst(input.count).first else { return true }
+        // The latest text may still be completing the same word or number.
+        if last.isASCII, last.isLetter, (next.isASCII && next.isLetter) || "'’".contains(next) { return false }
+        return !last.isASCII || !last.isNumber || !((next.isASCII && next.isNumber) || ".,".contains(next))
+    }
+
+    private static func endsSentence(_ text: String) -> Bool {
+        guard text.count >= 2, let last = text.last else { return false }
+        if "。！？!?".contains(last) { return true }
+        // Avoid locking at a decimal point, ellipsis, or short abbreviation.
+        guard last == ".", text.count >= 4 else { return false }
+        return text.dropLast().suffix(3).allSatisfy { $0.isASCII && $0.isLetter && $0.isLowercase }
     }
 
     private nonisolated static func prepareSpeaker(_ source: String, destination: URL) throws {

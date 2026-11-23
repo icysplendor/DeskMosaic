@@ -307,6 +307,7 @@ internal static class StreamingRecognition
         {
             await readyToTranslate().WaitAsync(active);
             var submitted = new TranslationCaption?[2];
+            var completed = new TranslationCaption?[2];
             while (true)
             {
                 active.ThrowIfCancellationRequested();
@@ -355,9 +356,27 @@ internal static class StreamingRecognition
                 }
 
                 using var previewLifetime = previewCancellation!;
+                var anchor = completed[chosen];
+                string source = request.Source;
+                if (anchor is not null && anchor.Id == request.Id &&
+                    source.StartsWith(anchor.Source, StringComparison.Ordinal))
+                {
+                    string remainder = source[anchor.Source.Length..].TrimStart();
+                    // Keep a row in one language when a new clause changes the two-way direction.
+                    if (remainder.Length != 0 && (!options.TwoWay ||
+                        ChineseEnglishSource.Detect(remainder) == ChineseEnglishSource.Detect(anchor.Source)))
+                        source = remainder;
+                    else
+                        anchor = null;
+                }
+                else
+                {
+                    anchor = null;
+                }
+                completed[chosen] = anchor;
                 try
                 {
-                    var result = await TranslateSafely(request.Source, provisional: true, text => Preview(text, complete: false), previewLifetime.Token);
+                    var result = await TranslateSafely(source, provisional: true, text => Preview(text, complete: false), previewLifetime.Token);
                     submitted[chosen] = request;
                     Preview(result, complete: true);
                 }
@@ -377,16 +396,21 @@ internal static class StreamingRecognition
                     lock (state)
                     {
                         if (drafts[chosen] is not { } current || current.Id != request.Id) return;
-                        // A provisional stop may disappear as the sentence continues.
-                        // Leave it out of the preview so it cannot block a matching extension.
-                        int length = text.AsSpan().TrimEnd(" ，。！？；：、,.!?;:…").Length;
+                        if (!StillRepresentsSource(request.Source, current.Source)) return;
                         string visible = current.Translation ?? "";
-                        if (length > visible.Length && text.StartsWith(visible, StringComparison.Ordinal))
+                        if (anchor?.Translation is { Length: > 0 } prefix)
+                            text = prefix + (prefix[^1] is '。' or '！' or '？' ? "" : " ") + text;
+
+                        // Rephrasing the open sentence is fine. Publish a conflicting preview
+                        // once it is complete instead of replacing the text token by token.
+                        if (text != visible && (complete || text.StartsWith(visible, StringComparison.Ordinal)))
                         {
-                            var updated = current with { Translation = text[..length] };
+                            var updated = current with { Translation = text };
                             drafts[chosen] = updated;
                             caption(updated);
                         }
+                        if (complete && EndsSentence(request.Source) && EndsSentence(text))
+                            completed[chosen] = request with { Translation = text };
                         draftHasOutput = true;
                         if (!complete) CancelStaleDraft(current);
                     }
@@ -398,7 +422,7 @@ internal static class StreamingRecognition
         {
             if (!draftHasOutput || draftInput is not { } input || current.Id != input.Id) return;
             int minimumGrowth = input.Source.Any(letter => char.IsLetter(letter) && !char.IsAscii(letter)) ? 4 : 12;
-            if (current.Source.Length - input.Source.Length >= minimumGrowth)
+            if (!EndsSentence(input.Source) && current.Source.Length - input.Source.Length >= minimumGrowth)
                 draftRequest?.Cancel();
         }
 
@@ -411,6 +435,27 @@ internal static class StreamingRecognition
                 return "";
             }
         }
+    }
+
+    private static bool StillRepresentsSource(string input, string current)
+    {
+        if (!current.StartsWith(input, StringComparison.Ordinal)) return false;
+        if (current.Length == input.Length) return true;
+        char next = current[input.Length];
+        // Do not display the result for "can" after the source has reached "can't",
+        // or the result for a number while the same number is still growing.
+        if (char.IsAsciiLetter(input[^1]) && (char.IsAsciiLetter(next) || next is '\'' or '’')) return false;
+        return !char.IsAsciiDigit(input[^1]) || !(char.IsAsciiDigit(next) || next is '.' or ',');
+    }
+
+    private static bool EndsSentence(string text)
+    {
+        // A comma can introduce a condition that changes the meaning of the preceding words.
+        if (text.Length < 2) return false;
+        if (text[^1] is '。' or '！' or '？' or '!' or '?') return true;
+        // Avoid locking at a decimal point, ellipsis, or short abbreviation.
+        return text.Length >= 4 && text[^1] == '.' &&
+            char.IsAsciiLetterLower(text[^2]) && char.IsAsciiLetterLower(text[^3]) && char.IsAsciiLetterLower(text[^4]);
     }
 
     private static TextWriter? OpenDiagnosticLog()
