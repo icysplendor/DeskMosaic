@@ -324,17 +324,14 @@ internal static class StreamingRecognition
                         for (int index = 0; index < drafts.Length; index++)
                         {
                             if (drafts[index] is not { } draft) continue;
-                            string source = PreviewSource(draft.Source);
-                            if (source.Length == 0 ||
-                                (submitted[index]?.Id == draft.Id && submitted[index]?.Source == source)) continue;
+                            if (submitted[index]?.Id == draft.Id && submitted[index]?.Source == draft.Source) continue;
                             int remaining = (int)Math.Max(0, lastRequest[index] + 250 - now);
                             if (remaining == 0 && (chosen == -1 || lastRequest[index] < lastRequest[chosen])) chosen = index;
                             delay = Math.Min(delay, remaining);
                         }
                         if (chosen >= 0)
                         {
-                            var draft = drafts[chosen]!;
-                            request = draft with { Source = PreviewSource(draft.Source) };
+                            request = drafts[chosen]!;
                             lastRequest[chosen] = now;
                             previewCancellation = CancellationTokenSource.CreateLinkedTokenSource(active);
                             draftRequest = previewCancellation;
@@ -402,7 +399,7 @@ internal static class StreamingRecognition
         {
             if (!draftHasOutput || draftInput is not { } input || current.Id != input.Id) return;
             int minimumGrowth = input.Source.Any(letter => char.IsLetter(letter) && !char.IsAscii(letter)) ? 4 : 12;
-            if (PreviewSource(current.Source).Length - input.Source.Length >= minimumGrowth)
+            if (current.Source.Length - input.Source.Length >= minimumGrowth)
                 draftRequest?.Cancel();
         }
 
@@ -415,15 +412,6 @@ internal static class StreamingRecognition
                 return "";
             }
         }
-    }
-
-    private static string PreviewSource(string source)
-    {
-        // The rightmost Latin word often ends mid-word while the speaker is still talking.
-        if (!char.IsAsciiLetter(source[^1])) return source;
-        int end = source.Length;
-        while (end > 0 && char.IsAsciiLetter(source[end - 1])) end--;
-        return source[..end].TrimEnd();
     }
 
     private static TextWriter? OpenDiagnosticLog()

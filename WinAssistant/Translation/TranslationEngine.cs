@@ -112,7 +112,7 @@ internal sealed class TranslationEngine
             string target = selectedTarget;
             if (options.TwoWay)
             {
-                var detected = ChineseEnglishSource.Detect(source, provisional);
+                var detected = ChineseEnglishSource.Detect(source);
                 if (detected is null) return provisional ? "" : source;
                 (inputLanguage, target) = detected.Value;
             }

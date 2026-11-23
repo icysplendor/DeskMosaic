@@ -4,7 +4,7 @@ namespace WinAssistant.Translation;
 
 internal static class ChineseEnglishSource
 {
-    internal static (string Source, string Target)? Detect(string text, bool provisional)
+    internal static (string Source, string Target)? Detect(string text)
     {
         int chinese = 0, english = 0;
         string? first = null;
@@ -32,9 +32,6 @@ internal static class ChineseEnglishSource
                 inEnglishWord = false;
             }
         }
-        int total = chinese + english;
-        if (provisional && (total < 4 || Math.Abs(chinese - english) < 2 || Math.Max(chinese, english) * 5 < total * 3))
-            return null;
         string? language = chinese == english ? first : chinese > english ? "Chinese" : "English";
         return language is null ? null : (language, language == "Chinese" ? "English" : "Chinese");
     }

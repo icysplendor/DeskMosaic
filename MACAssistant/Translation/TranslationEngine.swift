@@ -125,7 +125,7 @@ enum ChineseEnglishSource: String {
 
     var target: String { self == .chinese ? Self.english.rawValue : Self.chinese.rawValue }
 
-    static func detect(_ text: String, provisional: Bool) -> Self? {
+    static func detect(_ text: String) -> Self? {
         var chinese = 0, english = 0
         var first: Self?
         var inEnglishWord = false
@@ -145,10 +145,6 @@ enum ChineseEnglishSource: String {
             } else if code != 0x27 && code != 0x2019 {
                 inEnglishWord = false
             }
-        }
-        let total = chinese + english
-        if provisional && (total < 4 || abs(chinese - english) < 2 || max(chinese, english) * 5 < total * 3) {
-            return nil
         }
         if chinese == english { return first }
         return chinese > english ? .chinese : .english
@@ -439,7 +435,7 @@ final class TranslationEngine {
             var inputLanguage = sourceLanguage
             var target = selectedTarget
             if options.twoWay {
-                guard let detected = ChineseEnglishSource.detect(source, provisional: provisional) else {
+                guard let detected = ChineseEnglishSource.detect(source) else {
                     return provisional ? "" : source
                 }
                 inputLanguage = detected.rawValue

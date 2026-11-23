@@ -221,8 +221,7 @@ final class StreamingRecognition {
                 let now = ProcessInfo.processInfo.systemUptime
                 let changed = drafts.indices.filter { index in
                     guard let draft = drafts[index] else { return false }
-                    let source = Self.previewSource(draft.source)
-                    return !source.isEmpty && (submitted[index]?.id != draft.id || submitted[index]?.source != source)
+                    return submitted[index]?.id != draft.id || submitted[index]?.source != draft.source
                 }
                 guard let index = changed.min(by: { lastRequest[$0] < lastRequest[$1] }) else {
                     _ = await updated.next()
@@ -234,20 +233,18 @@ final class StreamingRecognition {
                     continue
                 }
                 guard let request = drafts[index] else { continue }
-                let source = Self.previewSource(request.source)
                 lastRequest[index] = now
-                draftInput = (request.id, source)
+                draftInput = (request.id, request.source)
                 draftHasOutput = false
                 let job = Task {
-                    try await translateSafely(source, provisional: true) { preview($0, complete: false) }
+                    try await translateSafely(request.source, provisional: true) { preview($0, complete: false) }
                 }
                 draftRequest = job
                 let result = (try? await job.value) ?? ""
                 draftRequest = nil
                 draftInput = nil
                 try Task.checkCancellation()
-                submitted[index] = TranslationCaption(id: request.id, microphone: request.microphone,
-                                                      source: source, translation: nil)
+                submitted[index] = request
                 preview(result, complete: true)
 
                 @MainActor func preview(_ text: String, complete: Bool) {
@@ -360,7 +357,7 @@ final class StreamingRecognition {
         func cancelStaleDraft(_ current: TranslationCaption) {
             guard draftHasOutput, let input = draftInput, current.id == input.id else { return }
             let minimumGrowth = input.source.contains { $0.isLetter && !$0.isASCII } ? 4 : 12
-            if Self.previewSource(current.source).count - input.source.count >= minimumGrowth {
+            if current.source.count - input.source.count >= minimumGrowth {
                 draftRequest?.cancel()
             }
         }
@@ -373,14 +370,6 @@ final class StreamingRecognition {
                 return ""
             }
         }
-    }
-
-    private static func previewSource(_ source: String) -> String {
-        // The rightmost Latin word often ends mid-word while the speaker is still talking.
-        func latin(_ value: Character) -> Bool { value.isASCII && value.isLetter }
-        guard let last = source.last, latin(last) else { return source }
-        let end = source.lastIndex { !latin($0) }.map { source.index(after: $0) } ?? source.startIndex
-        return source[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private nonisolated static func prepareSpeaker(_ source: String, destination: URL) throws {
