@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>设置笔记本账号</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font:
+        15px/1.5 system-ui,
+        sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      display: grid;
+      place-items: center;
+      background: light-dark(#f4f7fb, #111b2b);
+      color: light-dark(#16243b, #edf3ff);
+    }
+    form {
+      width: min(360px, calc(100vw - 64px));
+      padding: 28px;
+      border: 1px solid light-dark(#d9e2ef, #33445e);
+      border-radius: 16px;
+      background: light-dark(#fff, #1b283c);
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 12px;
+    }
+    p {
+      opacity: 0.8;
+    }
+    label {
+      display: block;
+      margin-top: 16px;
+    }
+    input,
+    button {
+      box-sizing: border-box;
+      width: 100%;
+      font: inherit;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+    input {
+      margin-top: 6px;
+      border: 1px solid light-dark(#c6d2e3, #486079);
+      background: transparent;
+      color: inherit;
+    }
+    button {
+      background: #326be6;
+      color: white;
+      border: 0;
+      margin-top: 16px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+    }
+    [role="alert"] {
+      color: light-dark(#b42332, #ff9ba9);
+      opacity: 1;
+    }
+  </style>
+  <form>
+    <h1>设置笔记本账号</h1>
+    <p>这是笔记本专用账号。设置至少 12 个字符的密码；此链接仅可使用一次。</p>
+    <label
+      >用户名<input name="user" autocomplete="username" maxlength="64" required
+    /></label>
+    <label
+      >密码<input
+        name="password"
+        type="password"
+        autocomplete="new-password"
+        minlength="12"
+        maxlength="512"
+        required
+    /></label>
+    <label
+      >确认密码<input
+        name="confirm"
+        type="password"
+        autocomplete="new-password"
+        minlength="12"
+        maxlength="512"
+        required
+    /></label>
+    <p role="alert"></p>
+    <button>保存并登录</button>
+  </form>
+  <script>
+    const token = new URLSearchParams(location.hash.slice(1)).get("setup");
+    history.replaceState(null, "", location.pathname);
+    const form = document.querySelector("form"),
+      button = form.querySelector("button"),
+      error = form.querySelector("[role=alert]");
+    if (!token) {
+      error.textContent = "请使用服务器生成的一次性设置链接。";
+      button.disabled = true;
+    }
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      error.textContent = "";
+      try {
+        if (form.elements.password.value !== form.elements.confirm.value)
+          throw Error("两次输入的密码不一致");
+        const response = await fetch("/api/setup", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token,
+            user: form.elements.user.value.trim(),
+            password: form.elements.password.value,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw Error(result.error || "服务暂时不可用");
+        form.reset();
+        location.replace("/");
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+      }
+    };
+  </script>
+</html>

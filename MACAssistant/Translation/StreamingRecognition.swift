@@ -1,0 +1,598 @@
+import AVFoundation
+import Darwin
+import Foundation
+
+@MainActor
+final class StreamingRecognition {
+    private var capture: TranslationAudioCapture?
+    private var process: Process?
+    private var recording: TranslationRecording?
+
+    func stop() {
+        capture?.stop()
+        capture = nil
+        if let process, process.isRunning { process.terminate() }
+        process = nil
+    }
+
+    func finishRecording() async throws -> URL? {
+        let current = recording
+        recording = nil
+        return try await current?.finish()
+    }
+
+    typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> String
+
+    func run(options: TranslationOptions, model: StreamingSpeechModel, archive: String, record: Bool, ready: () -> Void,
+             translationReady: (() async throws -> Void)?, caption: @escaping (TranslationCaption) -> Void,
+             translate: Translate?, diagnostic: TranslationDiagnosticLog?) async throws {
+        diagnostic?.write("speech_model_selected model=\(model.id)")
+        let speaker = options.selectedSpeakerModel
+        let speakerFile = "speaker.gguf"
+        let preparation = Task.detached {
+            let directory = try Self.prepareModel(model, archive: archive, diagnostic: diagnostic)
+            if !speaker.isEmpty {
+                diagnostic?.write("speaker_cache_preparing")
+                try Self.prepareSpeaker(speaker, destination: directory.appendingPathComponent(speakerFile))
+                diagnostic?.write("speaker_cache_ready")
+            }
+            return directory
+        }
+        let model = try await withTaskCancellationHandler(operation: { try await preparation.value },
+                                                          onCancel: { preparation.cancel() })
+        try Task.checkCancellation()
+        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
+        let helper = Process()
+        let helperURL = folder.appendingPathComponent("Helpers/streaming-asr")
+        helper.executableURL = helperURL
+        helper.currentDirectoryURL = model
+        helper.arguments = ["1",
+                            folder.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
+        if !speaker.isEmpty {
+            helper.arguments?.append(speakerFile)
+            helper.arguments?.append(folder.appendingPathComponent("Frameworks/Diarization/libnemo_speech_asr_c.dylib").path)
+            helper.arguments?.append(options.compute == "cpu" ? "cpu" : "auto")
+        }
+        let correction = StreamingSpeechModel.correction
+        let correctionArchive = options.selectedCorrectionModel
+        let correctParagraphs = options.enableCorrection && !correctionArchive.isEmpty &&
+            correction.languages.contains(options.selectedSourceLanguage)
+        diagnostic?.write("review_configuration enabled=\(options.enableCorrection) archive_found=\(!correctionArchive.isEmpty) eligible=\(correctParagraphs)")
+        if correctParagraphs {
+            helper.arguments?.append("--correction")
+            helper.arguments?.append("../../\(correction.download.sha256)/\(correction.archiveDirectory)")
+        }
+        let detector = folder.appendingPathComponent("Resources/silero_vad.onnx")
+        var environment = ProcessInfo.processInfo.environment
+        environment["ASSISTANT_MIC_VAD"] = options.microphone ? options.microphoneFilter : "off"
+        environment["ASSISTANT_MIC_PAUSE"] = options.microphonePause
+        environment["ASSISTANT_MIC_VAD_MODEL"] = FileManager.default.isReadableFile(atPath: detector.path) ? detector.path : nil
+        helper.environment = environment
+        let input = Pipe()
+        let output = Pipe()
+        helper.standardInput = input
+        helper.standardOutput = output
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            throw TranslationError("无法初始化流式语音通道。", "Could not initialize the streaming audio pipe.")
+        }
+        let (lines, events) = AsyncThrowingStream<String, Error>.makeStream()
+        let reader = StreamingLineReader(events: events)
+        let outputHandle = output.fileHandleForReading
+        outputHandle.readabilityHandler = { reader.read($0) }
+        defer {
+            stop()
+            outputHandle.readabilityHandler = nil
+            events.finish()
+        }
+        diagnostic?.watch(helper, name: "streaming_asr")
+        diagnostic?.write("speech_helper_checks executable=\(FileManager.default.isExecutableFile(atPath: helperURL.path))")
+        do { try helper.run() }
+        catch {
+            diagnostic?.failure("speech_helper_launch_failed", error)
+            throw error
+        }
+        process = helper
+        diagnostic?.write("speech_helper_waiting_for_ready")
+
+        let deadline = Task {
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+            diagnostic?.write("speech_helper_ready_timeout")
+            events.finish(throwing: TranslationError("加载中英流式模型超时。", "Streaming ASR model load timed out."))
+        }
+        defer { deadline.cancel() }
+        var received = lines.makeAsyncIterator()
+        guard try await received.next() == "ready" else {
+            diagnostic?.write("speech_helper_invalid_or_missing_ready")
+            throw TranslationError("中英流式识别启动失败。", "Streaming ASR failed to start.")
+        }
+        deadline.cancel()
+        diagnostic?.write("fast_engine_ready")
+
+        let recorder = try record ? TranslationRecording(
+            executable: folder.appendingPathComponent("Helpers/streaming-asr"),
+            stereo: options.systemAudio && options.microphone) : nil
+        recording = recorder
+        let (audio, frames) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingOldest(120))
+        let correctionPreparation = Task.detached(priority: .utility) {
+            guard correctParagraphs else { return }
+            let prepared: Bool
+            do {
+                _ = try Self.prepareModel(correction, archive: correctionArchive, diagnostic: diagnostic)
+                prepared = true
+            } catch {
+                let cause = error as NSError
+                diagnostic?.write("review_preparation_failed domain=\(cause.domain) code=\(cause.code)")
+                prepared = false
+            }
+            guard !Task.isCancelled else { return }
+            let header: [UInt32] = [.max, prepared ? 1 : 0, 0]
+            if case .dropped = frames.yield(header.withUnsafeBytes { Data($0) }) {
+                events.finish(throwing: TranslationError("语音识别跟不上音频。", "Streaming ASR is not keeping up with audio."))
+            }
+        }
+        defer { correctionPreparation.cancel() }
+        let writerHandle = input.fileHandleForWriting
+        let writer = Task.detached {
+            defer { try? writerHandle.close() }
+            do {
+                for await frame in audio { try writerHandle.write(contentsOf: frame) }
+            } catch { events.finish(throwing: error) }
+        }
+        let send: (Data) -> Void = { data in
+            if let recorder, !recorder.append(data) {
+                events.finish(throwing: TranslationRecordingError(message: TranslationError(
+                    "录音写入速度跟不上。", "The audio recorder could not keep up.")))
+            }
+            if case .dropped = frames.yield(data) {
+                events.finish(throwing: TranslationError("语音识别跟不上音频。", "Streaming ASR is not keeping up with audio."))
+            }
+        }
+        let system = StreamingAudioPacketizer(source: 0, emit: send)
+        let microphone = StreamingAudioPacketizer(source: 1, emit: send)
+        let capture = TranslationAudioCapture(system: system.append, microphone: microphone.append) {
+            diagnostic?.failure("audio_capture_failed", $0)
+            events.finish(throwing: $0)
+        }
+        self.capture = capture
+
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "assistant.translation.streaming"))
+        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        timer.setEventHandler { system.tick(); microphone.tick() }
+        timer.resume()
+        defer {
+            timer.cancel()
+            frames.finish()
+            writer.cancel()
+        }
+        diagnostic?.write("audio_capture_starting system=\(options.systemAudio) microphone=\(options.microphone)")
+        do { try await capture.start(system: options.systemAudio, microphone: options.microphone) }
+        catch {
+            diagnostic?.failure("audio_capture_start_failed", error)
+            throw error
+        }
+        try Task.checkCancellation()
+        diagnostic?.write("audio_capture_ready")
+        ready()
+
+        let (updates, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var drafts = [TranslationCaption?](repeating: nil, count: 2)
+        var pendingFinals: [TranslationCaption] = []
+        var pendingCorrections: [Int: TranslationCaption] = [:]
+        var nextID = 0
+        var draftRequest: Task<String, Error>?
+        var draftInput: (id: Int, source: String)?
+        var draftHasOutput = false
+
+        let translator = Task {
+            guard let translationReady else { return }
+            do { try await translationReady() }
+            catch {
+                if !Task.isCancelled { events.finish(throwing: error) }
+                return
+            }
+            var updated = updates.makeAsyncIterator()
+            var submitted = [TranslationCaption?](repeating: nil, count: 2)
+            var lastRequest = [Double](repeating: -1, count: 2)
+            while !Task.isCancelled {
+                if !pendingFinals.isEmpty {
+                    var final = pendingFinals.removeFirst()
+                    let pending = final
+                    final.translation = try await translateSafely(pending.source, provisional: false) { text in
+                        guard !text.isEmpty, text.count >= (pending.translation?.count ?? 0) else { return }
+                        var current = pending
+                        current.translation = text
+                        caption(current)
+                    }
+                    final.translationFinal = true
+                    try Task.checkCancellation()
+                    caption(final)
+                    continue
+                }
+                let now = ProcessInfo.processInfo.systemUptime
+                let changed = drafts.indices.filter { index in
+                    guard let draft = drafts[index] else { return false }
+                    let source = Self.previewSource(draft.source)
+                    return !source.isEmpty && (submitted[index]?.id != draft.id || submitted[index]?.source != source)
+                }
+                guard let index = changed.min(by: { lastRequest[$0] < lastRequest[$1] }) else {
+                    _ = await updated.next()
+                    continue
+                }
+                let delay = lastRequest[index] + 0.25 - now
+                if delay > 0 {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                guard let request = drafts[index] else { continue }
+                let source = Self.previewSource(request.source)
+                lastRequest[index] = now
+                draftInput = (request.id, source)
+                draftHasOutput = false
+                let job = Task {
+                    try await translateSafely(source, provisional: true) { preview($0, complete: false) }
+                }
+                draftRequest = job
+                let result = (try? await job.value) ?? ""
+                draftRequest = nil
+                draftInput = nil
+                try Task.checkCancellation()
+                submitted[index] = TranslationCaption(id: request.id, microphone: request.microphone,
+                                                      source: source, translation: nil)
+                preview(result, complete: true)
+
+                @MainActor func preview(_ text: String, complete: Bool) {
+                    guard !Task.isCancelled, var latest = drafts[index], latest.id == request.id, !text.isEmpty else { return }
+                    if latest.translation != text, complete || latest.translation.map({ text.count >= $0.count }) != false {
+                        latest.translation = text
+                        drafts[index] = latest
+                        caption(latest)
+                    }
+                    draftHasOutput = true
+                    if !complete { cancelStaleDraft(latest) }
+                }
+            }
+        }
+        defer {
+            draftRequest?.cancel()
+            translator.cancel()
+            signal.finish()
+        }
+
+        while let line = try await received.next() {
+            try Task.checkCancellation()
+            if line.hasPrefix("D\t") {
+                diagnostic?.write("review_\(line.dropFirst(2))")
+                continue
+            }
+            let fields = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false)
+            guard fields.count == 6, let index = Int(fields[0]), drafts.indices.contains(index),
+                  let speakerID = Int(fields[2]), let startMs = Int64(fields[3]), let endMs = Int64(fields[4]),
+                  startMs >= 0, endMs >= startMs else { continue }
+            let source = fields[5].trimmingCharacters(in: .whitespacesAndNewlines)
+            let kind = fields[1]
+            let correctionID = kind.first.map { "FRE".contains($0) } == true ? Int(kind.dropFirst()) : nil
+            if let correctionID, kind.first != "F" {
+                guard var corrected = pendingCorrections.removeValue(forKey: correctionID) else { continue }
+                corrected.review = kind.first == "E" ? .modelFailed : .kept
+                if source.contains(where: { $0.isLetter || $0.isNumber }) {
+                    if source != corrected.source {
+                        corrected.source = source
+                        corrected.translation = nil
+                        corrected.review = .revised
+                    }
+                    corrected.startMs = startMs
+                    corrected.endMs = endMs
+                }
+                diagnostic?.write("paragraph id=\(corrected.id) range_ms=\(startMs)-\(endMs) review=\(String(describing: corrected.review))")
+                caption(corrected)
+                if translationReady != nil { queueFinal(corrected) }
+                signal.yield(())
+                continue
+            }
+            let review: CaptionReview?
+            switch kind {
+            case "1" where !options.enableCorrection: review = .disabled
+            case "1" where !correction.languages.contains(options.selectedSourceLanguage): review = .languageUnsupported
+            case "1" where correctionArchive.isEmpty: review = .modelMissing
+            case "1": review = .unavailable
+            case "S1": review = .modelPreparing
+            case "S2": review = .modelFailed
+            case "S3": review = .noChinese
+            case "S4": review = .audioUnaligned
+            case "S5": review = .outsideLimits
+            case "S6": review = .queueFull
+            default: review = correctionID == nil ? nil : .pending
+            }
+            let final = review != nil
+            let previous = drafts[index]
+            guard source.contains(where: { $0.isLetter || $0.isNumber }),
+                  final || source != previous?.source || speakerID != previous?.speakerID ||
+                    startMs != previous?.startMs || endMs != previous?.endMs else { continue }
+            if previous == nil { nextID += 1 }
+            // A speaker change can move the tail of the draft to a new paragraph.
+            let translation = final && source.count < (previous?.source.count ?? 0) ? nil : previous?.translation
+            let item = TranslationCaption(id: previous?.id ?? nextID, microphone: index == 1, source: source,
+                                          translation: translation, sourceFinal: final, translationFinal: false, speakerID: speakerID,
+                                          startMs: startMs, endMs: endMs, review: review)
+            drafts[index] = final ? nil : item
+            if let review { diagnostic?.write("paragraph id=\(item.id) range_ms=\(startMs)-\(endMs) review=\(review)") }
+            caption(item)
+            if let correctionID {
+                pendingCorrections[correctionID] = item
+                draftRequest?.cancel()
+            } else if translationReady != nil {
+                if final { queueFinal(item) }
+                else { cancelStaleDraft(item) }
+            }
+            signal.yield(())
+        }
+        try Task.checkCancellation()
+        throw TranslationError("中英流式识别已意外退出。", "Streaming ASR exited unexpectedly.")
+
+        func queueFinal(_ item: TranslationCaption) {
+            if pendingFinals.count == 8 {
+                var dropped = pendingFinals.removeFirst()
+                dropped.translation = ""
+                dropped.translationFinal = true
+                caption(dropped)
+            }
+            pendingFinals.append(item)
+            draftRequest?.cancel()
+        }
+
+        func cancelStaleDraft(_ current: TranslationCaption) {
+            guard draftHasOutput, let input = draftInput, current.id == input.id else { return }
+            let minimumGrowth = input.source.contains { $0.isLetter && !$0.isASCII } ? 4 : 12
+            if Self.previewSource(current.source).count - input.source.count >= minimumGrowth {
+                draftRequest?.cancel()
+            }
+        }
+
+        func translateSafely(_ source: String, provisional: Bool, preview: @escaping @MainActor (String) -> Void) async throws -> String {
+            guard let translate else { return "" }
+            do { return try await translate(source, provisional, preview) }
+            catch {
+                try Task.checkCancellation()
+                return ""
+            }
+        }
+    }
+
+    private static func previewSource(_ source: String) -> String {
+        // The rightmost Latin word often ends mid-word while the speaker is still talking.
+        func latin(_ value: Character) -> Bool { value.isASCII && value.isLetter }
+        guard let last = source.last, latin(last) else { return source }
+        let end = source.lastIndex { !latin($0) }.map { source.index(after: $0) } ?? source.startIndex
+        return source[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private nonisolated static func prepareSpeaker(_ source: String, destination: URL) throws {
+        let model = TranslationModelDownload.onlineSpeaker
+        let files = FileManager.default
+        let directory = destination.deletingLastPathComponent()
+        if model.hasExpectedSize(destination.path) { return }
+        let temporary = directory.appendingPathComponent(".speaker-\(UUID().uuidString).part")
+        defer { try? files.removeItem(at: temporary) }
+        try files.copyItem(at: URL(fileURLWithPath: source), to: temporary)
+        guard try model.isVerified(temporary) else {
+            throw TranslationError("说话人模型校验失败。", "Speaker model verification failed.")
+        }
+        if files.fileExists(atPath: destination.path) {
+            _ = try files.replaceItemAt(destination, withItemAt: temporary)
+        } else {
+            do { try files.moveItem(at: temporary, to: destination) }
+            catch where model.hasExpectedSize(destination.path) { }
+        }
+    }
+
+    private nonisolated static func prepareModel(_ model: StreamingSpeechModel, archive: String,
+                                                 diagnostic: TranslationDiagnosticLog?) throws -> URL {
+        let files = FileManager.default
+        let release = model.download
+        let modelName = model.archiveDirectory
+        let root = try TranslationModelDownload.modelDirectory()
+        let destination = root.appendingPathComponent(release.sha256).appendingPathComponent(modelName)
+        func complete(_ folder: URL) -> Bool {
+            StreamingSpeechModel.runtimeFiles.allSatisfy { files.fileExists(atPath: folder.appendingPathComponent($0).path) }
+        }
+        if complete(destination) {
+            diagnostic?.write("model=\(model.id) cached")
+            return destination
+        }
+        diagnostic?.write("model=\(model.id) verifying_archive")
+        guard try release.isVerified(URL(fileURLWithPath: archive)) else {
+            throw TranslationError("请选择官方 X-ASR 模型压缩包，或在设置中重新下载。", "Select or download the official X-ASR archive.")
+        }
+        diagnostic?.write("model=\(model.id) extracting")
+        let staging = root.appendingPathComponent(".extract-\(UUID().uuidString)")
+        try files.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? files.removeItem(at: staging) }
+        let tar = Process()
+        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        tar.currentDirectoryURL = staging
+        tar.arguments = ["-xf", archive] + model.archiveFiles.map { "\(modelName)/\($0)" }
+        try Task.checkCancellation()
+        try tar.run()
+        tar.waitUntilExit()
+        try Task.checkCancellation()
+        diagnostic?.write("model=\(model.id) extraction_exit=\(tar.terminationStatus)")
+        let unpacked = staging.appendingPathComponent(modelName)
+        guard tar.terminationStatus == 0,
+              model.archiveFiles.allSatisfy({ files.fileExists(atPath: unpacked.appendingPathComponent($0).path) }) else {
+            throw TranslationError("无法解压流式模型。", "Could not extract the streaming model.")
+        }
+        for (original, runtime) in zip(model.archiveFiles, StreamingSpeechModel.runtimeFiles) where original != runtime {
+            try files.moveItem(at: unpacked.appendingPathComponent(original), to: unpacked.appendingPathComponent(runtime))
+        }
+        try files.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do { try files.moveItem(at: unpacked, to: destination) }
+        catch where complete(destination) { }
+        diagnostic?.write("model=\(model.id) installed")
+        return destination
+    }
+}
+
+final class TranslationDiagnosticLog: @unchecked Sendable {
+    private let output: FileHandle
+    private let lock = NSLock()
+
+    init() throws {
+        let files = FileManager.default
+        let directory = try files.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let name = "Translation-diagnostics-\(Int(Date().timeIntervalSince1970))-\(UUID()).log"
+        let url = directory.appendingPathComponent(name)
+        try Data().write(to: url, options: .withoutOverwriting)
+        output = try FileHandle(forWritingTo: url)
+    }
+
+    func failure(_ stage: String, _ error: Error) {
+        let cause = error as NSError
+        write("\(stage) domain=\(cause.domain) code=\(cause.code)")
+    }
+
+    func watch(_ process: Process, name: String) {
+        let pipe = Pipe()
+        process.standardError = pipe
+        process.environment = (process.environment ?? ProcessInfo.processInfo.environment).merging(
+            ["MACASSISTANT_TRANSLATION_DIAGNOSTICS": "1"], uniquingKeysWith: { _, value in value })
+        let stderr = TranslationStderrDiagnostics(log: self, process: name)
+        pipe.fileHandleForReading.readabilityHandler = { stderr.read($0) }
+        process.terminationHandler = { [self] task in
+            write("\(name)_exited reason=\(task.terminationReason.rawValue) status=\(task.terminationStatus)")
+        }
+    }
+
+    deinit { try? output.close() }
+
+    func write(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let line = "\(Date().ISO8601Format()) \(message)\n"
+        try? output.write(contentsOf: Data(line.utf8))
+    }
+}
+
+// The child can print paths or model text. Write only stage and error identifiers.
+private final class TranslationStderrDiagnostics: @unchecked Sendable {
+    private let log: TranslationDiagnosticLog
+    private let process: String
+    private var pending = Data()
+    private var reported: Set<String> = []
+
+    init(log: TranslationDiagnosticLog, process: String) {
+        self.log = log
+        self.process = process
+    }
+
+    func read(_ handle: FileHandle) {
+        let bytes = handle.availableData
+        if bytes.isEmpty {
+            classify(pending)
+            handle.readabilityHandler = nil
+            return
+        }
+        pending.append(bytes)
+        while let end = pending.firstIndex(of: 10) {
+            classify(pending.prefix(upTo: end))
+            pending.removeSubrange(...end)
+        }
+        if pending.count > 4096 { pending.removeAll(keepingCapacity: true) }
+    }
+
+    private func classify(_ line: Data) {
+        let text = String(decoding: line, as: UTF8.self)
+        let lower = text.lowercased()
+        let event: String
+        if text.hasPrefix("asr_startup="), text.utf8.count < 96,
+           text.dropFirst(12).utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || $0 == 95 }) {
+            event = text
+        } else if lower.contains("incompatible architecture") || lower.contains("wrong architecture") {
+            event = "incompatible_architecture"
+        } else if lower.contains("code signature") || lower.contains("library validation") {
+            event = "code_signature_or_library_validation"
+        } else if lower.contains("library not loaded") || lower.contains("image not found") {
+            event = "missing_dynamic_library"
+        } else if lower.contains("symbol not found") {
+            event = "missing_dynamic_symbol"
+        } else if lower.contains("no such file") {
+            event = "missing_file"
+        } else if lower.contains("permission denied") {
+            event = "permission_denied"
+        } else {
+            return
+        }
+        if reported.insert(event).inserted { log.write("\(process) \(event)") }
+    }
+}
+
+private final class StreamingLineReader: @unchecked Sendable {
+    private let events: AsyncThrowingStream<String, Error>.Continuation
+    private var pending = Data()
+
+    init(events: AsyncThrowingStream<String, Error>.Continuation) { self.events = events }
+
+    func read(_ handle: FileHandle) {
+        let bytes = handle.availableData
+        if bytes.isEmpty {
+            handle.readabilityHandler = nil
+            events.finish()
+            return
+        }
+        pending.append(bytes)
+        while let end = pending.firstIndex(of: 10) {
+            events.yield(String(decoding: pending[..<end], as: UTF8.self))
+            pending.removeSubrange(...end)
+        }
+    }
+}
+
+private final class StreamingAudioPacketizer: @unchecked Sendable {
+    private let source: UInt32
+    private let emit: (Data) -> Void
+    private let lock = NSLock()
+    private var rate: UInt32 = 0
+    private var lastPacket = 0.0
+
+    init(source: UInt32, emit: @escaping (Data) -> Void) {
+        self.source = source
+        self.emit = emit
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard let channels = buffer.floatChannelData, (8_000...384_000).contains(buffer.format.sampleRate),
+              buffer.format.channelCount > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        rate = UInt32(buffer.format.sampleRate)
+        lastPacket = ProcessInfo.processInfo.systemUptime
+        let channelCount = Int(buffer.format.channelCount)
+        for offset in stride(from: 0, to: Int(buffer.frameLength), by: 32768) {
+            let count = min(32768, Int(buffer.frameLength) - offset)
+            var samples = [Float](repeating: 0, count: count)
+            for index in samples.indices {
+                var sum: Float = 0
+                for channel in 0..<channelCount { sum += channels[channel][(offset + index) * buffer.stride] }
+                samples[index] = sum.isFinite ? min(1, max(-1, sum / Float(channelCount))) : 0
+            }
+            send(samples)
+        }
+    }
+
+    func tick() {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard rate > 0, now - lastPacket >= 0.15 else { return }
+        lastPacket = now
+        let silence = [Float](repeating: 0, count: Int(rate / 20))
+        send(silence)
+        send(silence)
+    }
+
+    private func send(_ samples: [Float]) {
+        let header = [source, rate, UInt32(samples.count)].map { $0.littleEndian }
+        var packet = header.withUnsafeBytes { Data($0) }
+        samples.withUnsafeBytes { packet.append(contentsOf: $0) }
+        emit(packet)
+    }
+}

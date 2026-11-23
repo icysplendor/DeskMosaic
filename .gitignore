@@ -1,0 +1,22 @@
+.DS_Store
+DerivedData/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+__pycache__/
+*.pyc
+**/bin/
+**/obj/
+publish-windows/
+release/
+Notebook/node_modules/
+
+# Offline editor resources are release inputs on both platforms.
+!Notebook/NotebookWeb/vendor/vditor/dist/
+!Notebook/NotebookWeb/vendor/vditor/dist/**
+
+# Independent notebook service runtime credentials never belong in source control.
+Notebook/deploy/.env
+Notebook/deploy/data/
+notes-data/

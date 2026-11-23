@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Version>0.5.0-beta.1</Version>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>DeskMosaic</AssemblyName>
+    <RootNamespace>WinAssistant</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
+    <DebugType>embedded</DebugType>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <RecordingEncoderDir>$(MSBuildProjectDirectory)/../build/recording-windows</RecordingEncoderDir>
+    <TranslationRuntimeDir>$(MSBuildProjectDirectory)/../build/translation-windows</TranslationRuntimeDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <EmbeddedResource Include="..\Notebook\NotebookWeb\**\*" LogicalName="NotebookWeb/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Resources\AppIcon.ico" />
+    <Resource Include="Resources\TrayIcon.ico" />
+    <Resource Include="..\MACAssistant\Assets.xcassets\AppEmblem.imageset\AppEmblem.png" Link="Resources\AppHeader.png" LogicalName="Resources/AppHeader.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <TranslationRuntime Include="llama.zip;llama-license.txt;llama-vulkan.zip;llama-vulkan-license.txt;streaming.zip;streaming-license.txt" />
+    <EmbeddedResource Include="$(TranslationRuntimeDir)/llama.zip;$(TranslationRuntimeDir)/llama-license.txt"
+                      Condition="Exists('$(TranslationRuntimeDir)/llama.zip') And Exists('$(TranslationRuntimeDir)/llama-license.txt')"
+                      LogicalName="TranslationRuntime/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(TranslationRuntimeDir)/llama-vulkan.zip;$(TranslationRuntimeDir)/llama-vulkan-license.txt"
+                      Condition="Exists('$(TranslationRuntimeDir)/llama-vulkan.zip') And Exists('$(TranslationRuntimeDir)/llama-vulkan-license.txt')"
+                      LogicalName="TranslationRuntime/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(TranslationRuntimeDir)/streaming.zip;$(TranslationRuntimeDir)/streaming-license.txt"
+                      Condition="Exists('$(TranslationRuntimeDir)/streaming.zip') And Exists('$(TranslationRuntimeDir)/streaming-license.txt')"
+                      LogicalName="TranslationRuntime/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(RecordingEncoderDir)/ffmpeg.exe"
+                      Condition="Exists('$(RecordingEncoderDir)/ffmpeg.exe')"
+                      LogicalName="RecordingEncoder/ffmpeg.exe" />
+    <EmbeddedResource Include="$(RecordingEncoderDir)/ffmpeg-license.txt"
+                      Condition="Exists('$(RecordingEncoderDir)/ffmpeg-license.txt')"
+                      LogicalName="RecordingEncoder/ffmpeg-license.txt" />
+  </ItemGroup>
+  <Target Name="VerifyRecordingEncoder" BeforeTargets="PrepareForBuild" Condition="'$(RequireBundledRecordingEncoder)' == 'true'">
+    <Error Condition="!Exists('$(RecordingEncoderDir)/ffmpeg.exe') Or !Exists('$(RecordingEncoderDir)/ffmpeg-license.txt')"
+           Text="Missing recording encoder. Run scripts/build-recording-encoder.sh windows build/recording-windows." />
+  </Target>
+  <Target Name="VerifyTranslationRuntimes" BeforeTargets="PrepareForBuild" Condition="'$(RequireBundledTranslation)' == 'true'">
+    <Error Condition="!Exists('$(TranslationRuntimeDir)/%(TranslationRuntime.Identity)')"
+           Text="Missing translation runtime %(TranslationRuntime.Identity). Run scripts/fetch-translation-runtimes.sh windows build/translation-windows." />
+  </Target>
+</Project>

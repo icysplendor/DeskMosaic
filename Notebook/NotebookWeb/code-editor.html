@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'"
+    />
+    <title>代码块编辑</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="code-editor.css" />
+    <script defer src="code-editor.js"></script>
+  </head>
+  <body class="code-window">
+    <header class="code-header">
+      <img src="app-emblem.png" width="24" height="24" alt="" />
+      <strong>代码块编辑</strong>
+      <span id="edit-state" role="status">正在加载…</span>
+      <span class="code-header-hint">独立窗口 · 保存后写回原代码块</span>
+    </header>
+    <nav class="code-tools" aria-label="代码编辑工具">
+      <label
+        >语言
+        <select id="language" aria-label="代码语言"></select
+      ></label>
+      <button id="find" title="Ctrl/Cmd+F">查找 / 替换</button>
+      <button id="go-line" title="Ctrl/Cmd+G">跳转行</button>
+      <button id="undo" title="Ctrl/Cmd+Z">撤销</button>
+      <button id="redo" title="Ctrl/Cmd+Shift+Z">重做</button>
+      <label class="wrap-option"
+        ><input id="wrap" type="checkbox" />自动换行</label
+      >
+      <label
+        >字号
+        <select id="font-size" aria-label="编辑字号">
+          <option>12</option>
+          <option selected>14</option>
+          <option>16</option>
+          <option>18</option>
+          <option>20</option>
+          <option>24</option>
+        </select></label
+      >
+      <button id="copy-all">复制全部</button>
+    </nav>
+    <main id="code-editor" aria-label="代码正文"></main>
+    <footer class="code-footer">
+      <div class="code-stats" aria-label="编辑统计">
+        <span id="cursor-position">行 1，列 1</span>
+        <span id="line-count">1 行</span>
+        <span id="char-count" title="按 Unicode 码点计数，换行计为一个字符"
+          >0 字符</span
+        >
+        <span id="selection-count">选中 0 字符</span>
+        <span class="encoding">UTF-8 · LF</span>
+      </div>
+      <span id="editor-message" role="status"></span>
+      <div class="code-actions">
+        <button id="cancel">取消</button
+        ><button id="save" class="primary" title="Ctrl/Cmd+S">
+          保存并返回
+        </button>
+      </div>
+    </footer>
+    <dialog id="discard-dialog">
+      <h2>放弃本次代码修改？</h2>
+      <p>内容或语言尚未保存到笔记。</p>
+      <div class="dialog-actions">
+        <button id="keep-editing">继续编辑</button
+        ><button id="discard" class="danger">放弃修改</button>
+      </div>
+    </dialog>
+  </body>
+</html>

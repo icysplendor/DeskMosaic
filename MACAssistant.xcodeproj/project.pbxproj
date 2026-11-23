@@ -1,0 +1,518 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* MACAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* MACAssistantApp.swift */; };
+		100000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* AppDelegate.swift */; };
+		100000000000000000000003 /* MenuContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* MenuContentView.swift */; };
+		100000000000000000000004 /* DisplayMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* DisplayMode.swift */; };
+		100000000000000000000005 /* DisplayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* DisplayManager.swift */; };
+		100000000000000000000006 /* MouseScrollBehavior.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* MouseScrollBehavior.swift */; };
+		100000000000000000000007 /* MouseScrollManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* MouseScrollManager.swift */; };
+		100000000000000000000008 /* EventTapManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* EventTapManager.swift */; };
+		100000000000000000000009 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* SettingsManager.swift */; };
+		10000000000000000000000A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000A /* SettingsView.swift */; };
+		10000000000000000000000B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* Assets.xcassets */; };
+		10000000000000000000000D /* ScrollSourceClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* ScrollSourceClassifierTests.swift */; };
+		10000000000000000000000E /* ShortcutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* ShortcutManager.swift */; };
+		10000000000000000000000F /* ScreenshotManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* ScreenshotManager.swift */; };
+		100000000000000000000080 /* RegionRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000080 /* RegionRecording.swift */; };
+		100000000000000000000010 /* PersistentConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* PersistentConfiguration.swift */; };
+		100000000000000000000011 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* AudioManager.swift */; };
+		100000000000000000000012 /* AudioConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* AudioConfigurationTests.swift */; };
+		100000000000000000000020 /* NotebookService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* NotebookService.swift */; };
+		100000000000000000000021 /* NotebookWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* NotebookWindowController.swift */; };
+		100000000000000000000022 /* NotebookWeb in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* NotebookWeb */; };
+		100000000000000000000023 /* NotebookDAVURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* NotebookDAVURL.swift */; };
+		100000000000000000000024 /* NotebookDAVURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* NotebookDAVURLTests.swift */; };
+		100000000000000000000025 /* ScreenshotRenderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* ScreenshotRenderingTests.swift */; };
+		100000000000000000000031 /* TranslationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000031 /* TranslationEngine.swift */; };
+		100000000000000000000037 /* StreamingRecognition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000037 /* StreamingRecognition.swift */; };
+		100000000000000000000038 /* TranslationRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000038 /* TranslationRecording.swift */; };
+		100000000000000000000032 /* TranslationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* TranslationWindow.swift */; };
+		100000000000000000000033 /* TranslationAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000033 /* TranslationAudioCapture.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* MACAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MACAssistantApp.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* MenuContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContentView.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* DisplayMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayMode.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* DisplayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayManager.swift; sourceTree = "<group>"; };
+		200000000000000000000006 /* MouseScrollBehavior.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseScrollBehavior.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* MouseScrollManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseScrollManager.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* EventTapManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTapManager.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
+		20000000000000000000000A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		20000000000000000000000B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		20000000000000000000000C /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		20000000000000000000000D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		20000000000000000000000E /* MACAssistant.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MACAssistant.entitlements; sourceTree = "<group>"; };
+		20000000000000000000000F /* DeskMosaic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "DeskMosaic.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000010 /* ScrollSourceClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSourceClassifierTests.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* MACAssistantTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MACAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000012 /* ShortcutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutManager.swift; sourceTree = "<group>"; };
+		200000000000000000000013 /* ScreenshotManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotManager.swift; sourceTree = "<group>"; };
+		200000000000000000000080 /* RegionRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegionRecording.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* PersistentConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistentConfiguration.swift; sourceTree = "<group>"; };
+		200000000000000000000015 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
+		200000000000000000000016 /* AudioConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioConfigurationTests.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* NotebookService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Notebook/NotebookService.swift"; sourceTree = "<group>"; };
+		200000000000000000000021 /* NotebookWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Notebook/NotebookWindowController.swift"; sourceTree = "<group>"; };
+		200000000000000000000022 /* NotebookWeb */ = {isa = PBXFileReference; lastKnownFileType = folder; name = NotebookWeb; path = "../Notebook/NotebookWeb"; sourceTree = "<group>"; };
+		200000000000000000000023 /* NotebookDAVURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Notebook/NotebookDAVURL.swift"; sourceTree = "<group>"; };
+		200000000000000000000024 /* NotebookDAVURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookDAVURLTests.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* ScreenshotRenderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotRenderingTests.swift; sourceTree = "<group>"; };
+		200000000000000000000031 /* TranslationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Translation/TranslationEngine.swift"; sourceTree = "<group>"; };
+		200000000000000000000037 /* StreamingRecognition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Translation/StreamingRecognition.swift"; sourceTree = "<group>"; };
+		200000000000000000000038 /* TranslationRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Translation/TranslationRecording.swift"; sourceTree = "<group>"; };
+		200000000000000000000032 /* TranslationWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Translation/TranslationWindow.swift"; sourceTree = "<group>"; };
+		200000000000000000000033 /* TranslationAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Audio/TranslationAudioCapture.swift"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000002 /* MACAssistant */,
+				400000000000000000000009 /* MACAssistantTests */,
+				400000000000000000000007 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000002 /* MACAssistant */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000020 /* NotebookService.swift */,
+				200000000000000000000023 /* NotebookDAVURL.swift */,
+				200000000000000000000021 /* NotebookWindowController.swift */,
+				200000000000000000000033 /* TranslationAudioCapture.swift */,
+				200000000000000000000032 /* TranslationWindow.swift */,
+				200000000000000000000031 /* TranslationEngine.swift */,
+				200000000000000000000037 /* StreamingRecognition.swift */,
+				200000000000000000000038 /* TranslationRecording.swift */,
+				200000000000000000000022 /* NotebookWeb */,
+				200000000000000000000001 /* MACAssistantApp.swift */,
+				200000000000000000000002 /* AppDelegate.swift */,
+				400000000000000000000003 /* MenuBar */,
+				400000000000000000000004 /* Display */,
+				400000000000000000000005 /* Mouse */,
+				400000000000000000000006 /* Settings */,
+				40000000000000000000000A /* Shortcuts */,
+				40000000000000000000000B /* Screenshot */,
+				40000000000000000000000C /* Audio */,
+				20000000000000000000000B /* Assets.xcassets */,
+				400000000000000000000008 /* Resources */,
+				20000000000000000000000D /* Info.plist */,
+				20000000000000000000000E /* MACAssistant.entitlements */,
+			);
+			path = MACAssistant;
+			sourceTree = "<group>";
+		};
+		400000000000000000000003 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000003 /* MenuContentView.swift */,
+			);
+			path = MenuBar;
+			sourceTree = "<group>";
+		};
+		400000000000000000000004 /* Display */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000004 /* DisplayMode.swift */,
+				200000000000000000000005 /* DisplayManager.swift */,
+			);
+			path = Display;
+			sourceTree = "<group>";
+		};
+		400000000000000000000005 /* Mouse */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000006 /* MouseScrollBehavior.swift */,
+				200000000000000000000007 /* MouseScrollManager.swift */,
+				200000000000000000000008 /* EventTapManager.swift */,
+			);
+			path = Mouse;
+			sourceTree = "<group>";
+		};
+		400000000000000000000006 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000009 /* SettingsManager.swift */,
+				20000000000000000000000A /* SettingsView.swift */,
+				200000000000000000000014 /* PersistentConfiguration.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		400000000000000000000007 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000F /* DeskMosaic.app */,
+				200000000000000000000011 /* MACAssistantTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		400000000000000000000008 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000C /* AppIcon.icns */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		400000000000000000000009 /* MACAssistantTests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* ScrollSourceClassifierTests.swift */,
+				200000000000000000000016 /* AudioConfigurationTests.swift */,
+				200000000000000000000024 /* NotebookDAVURLTests.swift */,
+				200000000000000000000025 /* ScreenshotRenderingTests.swift */,
+			);
+			path = MACAssistantTests;
+			sourceTree = "<group>";
+		};
+		40000000000000000000000A /* Shortcuts */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000012 /* ShortcutManager.swift */,
+			);
+			path = Shortcuts;
+			sourceTree = "<group>";
+		};
+		40000000000000000000000B /* Screenshot */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000013 /* ScreenshotManager.swift */,
+				200000000000000000000080 /* RegionRecording.swift */,
+			);
+			path = Screenshot;
+			sourceTree = "<group>";
+		};
+		40000000000000000000000C /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000015 /* AudioManager.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		B00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 600000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = MACAssistant;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* MACAssistant */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000002 /* Build configuration list for PBXNativeTarget "MACAssistant" */;
+			buildPhases = (
+				700000000000000000000001 /* Sources */,
+				300000000000000000000001 /* Frameworks */,
+				800000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MACAssistant;
+			productName = "DeskMosaic";
+			productReference = 20000000000000000000000F /* DeskMosaic.app */;
+			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000002 /* MACAssistantTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000003 /* Build configuration list for PBXNativeTarget "MACAssistantTests" */;
+			buildPhases = (
+				700000000000000000000002 /* Sources */,
+				300000000000000000000002 /* Frameworks */,
+				800000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B00000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = MACAssistantTests;
+			productName = MACAssistantTests;
+			productReference = 200000000000000000000011 /* MACAssistantTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		B00000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* MACAssistant */;
+			targetProxy = B00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXProject section */
+		600000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					500000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					500000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 500000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = 900000000000000000000001 /* Build configuration list for PBXProject "MACAssistant" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				zh_CN,
+			);
+			mainGroup = 400000000000000000000001;
+			productRefGroup = 400000000000000000000007 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* MACAssistant */,
+				500000000000000000000002 /* MACAssistantTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		800000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000022 /* NotebookWeb in Resources */,
+				10000000000000000000000B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		800000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		700000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000020 /* NotebookService.swift in Sources */,
+				100000000000000000000023 /* NotebookDAVURL.swift in Sources */,
+				100000000000000000000021 /* NotebookWindowController.swift in Sources */,
+				100000000000000000000033 /* TranslationAudioCapture.swift in Sources */,
+				100000000000000000000032 /* TranslationWindow.swift in Sources */,
+				100000000000000000000031 /* TranslationEngine.swift in Sources */,
+				100000000000000000000037 /* StreamingRecognition.swift in Sources */,
+				100000000000000000000038 /* TranslationRecording.swift in Sources */,
+				100000000000000000000001 /* MACAssistantApp.swift in Sources */,
+				100000000000000000000002 /* AppDelegate.swift in Sources */,
+				100000000000000000000003 /* MenuContentView.swift in Sources */,
+				100000000000000000000004 /* DisplayMode.swift in Sources */,
+				100000000000000000000005 /* DisplayManager.swift in Sources */,
+				100000000000000000000006 /* MouseScrollBehavior.swift in Sources */,
+				100000000000000000000007 /* MouseScrollManager.swift in Sources */,
+				100000000000000000000008 /* EventTapManager.swift in Sources */,
+				100000000000000000000009 /* SettingsManager.swift in Sources */,
+				10000000000000000000000A /* SettingsView.swift in Sources */,
+				10000000000000000000000E /* ShortcutManager.swift in Sources */,
+				10000000000000000000000F /* ScreenshotManager.swift in Sources */,
+				100000000000000000000080 /* RegionRecording.swift in Sources */,
+				100000000000000000000010 /* PersistentConfiguration.swift in Sources */,
+				100000000000000000000011 /* AudioManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		700000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000D /* ScrollSourceClassifierTests.swift in Sources */,
+				100000000000000000000012 /* AudioConfigurationTests.swift in Sources */,
+				100000000000000000000024 /* NotebookDAVURLTests.swift in Sources */,
+				100000000000000000000025 /* ScreenshotRenderingTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_TESTABILITY = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MACAssistant/MACAssistant.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MACAssistant/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.5.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.macassistant.app;
+				PRODUCT_MODULE_NAME = MACAssistant;
+				PRODUCT_NAME = "DeskMosaic";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "arm64 x86_64";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MACAssistant/MACAssistant.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MACAssistant/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.5.0;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = com.macassistant.app;
+				PRODUCT_MODULE_NAME = MACAssistant;
+				PRODUCT_NAME = "DeskMosaic";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.macassistant.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DeskMosaic.app/Contents/MacOS/DeskMosaic";
+			};
+			name = Debug;
+		};
+		A00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.macassistant.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DeskMosaic.app/Contents/MacOS/DeskMosaic";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		900000000000000000000001 /* Build configuration list for PBXProject "MACAssistant" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000001 /* Debug */,
+				A00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		900000000000000000000002 /* Build configuration list for PBXNativeTarget "MACAssistant" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000003 /* Debug */,
+				A00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		900000000000000000000003 /* Build configuration list for PBXNativeTarget "MACAssistantTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000005 /* Debug */,
+				A00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 600000000000000000000001 /* Project object */;
+}

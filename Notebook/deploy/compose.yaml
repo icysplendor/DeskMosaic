@@ -1,0 +1,22 @@
+services:
+  notes:
+    build:
+      context: ${NOTES_SOURCE:?Set NOTES_SOURCE to the repository checkout}
+      dockerfile: Notebook/deploy/Dockerfile
+    container_name: assistant-notes
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18083:8080"
+    environment:
+      NOTES_SECRET: ${NOTES_SECRET:?Generate a random server encryption secret}
+      NOTES_ORIGIN: ${NOTES_ORIGIN:?Set the public HTTPS notebook origin}
+      NOTES_DAV_ORIGIN: ${NOTES_DAV_ORIGIN:?Set the HTTPS Nextcloud origin}
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

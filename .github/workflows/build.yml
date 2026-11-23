@@ -1,0 +1,428 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_macos:
+        description: "构建 macOS Apple Silicon DMG"
+        type: boolean
+        default: true
+      build_windows:
+        description: "构建 Windows x64 EXE"
+        type: boolean
+        default: true
+      create_release:
+        description: "将所选平台的安装包发布到 GitHub Release"
+        required: true
+        type: boolean
+        default: false
+      prerelease:
+        description: "将 GitHub Release 标为预发布（Beta）"
+        type: boolean
+        default: false
+      release_tag:
+        description: "Release 标签，例如 v1.0.0（仅创建 Release 时填写）"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  validate-platform-selection:
+    if: ${{ !inputs.build_macos && !inputs.build_windows }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::请至少勾选一个平台 / Select at least one platform."
+          exit 1
+
+  build-macos:
+    if: ${{ inputs.build_macos }}
+    name: Build macOS Apple Silicon
+    runs-on: macos-15
+    env:
+      MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_CERTIFICATE_BASE64 != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build and run unit tests
+        timeout-minutes: 10
+        run: |
+          runner_arch="$(uname -m)"
+          mkdir -p test-results
+          xcodebuild \
+            -project MACAssistant.xcodeproj \
+            -scheme MACAssistant \
+            -configuration Debug \
+            -destination "platform=macOS,arch=${runner_arch}" \
+            -derivedDataPath build-ci \
+            -resultBundlePath test-results/MACAssistantTests.xcresult \
+            -parallel-testing-enabled NO \
+            ARCHS="${runner_arch}" \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            clean test
+
+      - name: Upload macOS test diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macassistant-test-diagnostics
+          path: test-results/MACAssistantTests.xcresult
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Build arm64 Release application
+        run: |
+          xcodebuild \
+            -quiet \
+            -project MACAssistant.xcodeproj \
+            -scheme MACAssistant \
+            -configuration Release \
+            -derivedDataPath build-release \
+            ARCHS="arm64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build
+
+      - name: Build macOS recording encoder
+        run: |
+          command -v pkg-config >/dev/null || brew install pkgconf
+          bash scripts/build-recording-encoder.sh macos build/recording-macos
+          mkdir -p release
+          cp build/recording-macos/recording-encoder-source.zip release/recording-encoder-source-macos.zip
+
+      - name: Ad-hoc sign and verify application
+        if: ${{ env.MACOS_SIGNING_ENABLED != 'true' }}
+        run: |
+          app_path="build-release/Build/Products/Release/DeskMosaic.app"
+          bash scripts/bundle-macos-translation-runtimes.sh "$app_path" -
+          bash scripts/bundle-macos-recording-encoder.sh "$app_path" - build/recording-macos
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp=none \
+            --entitlements "MACAssistant/MACAssistant.entitlements" \
+            --sign - \
+            "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign --display --verbose=2 "$app_path"
+          lipo -info "$app_path/Contents/MacOS/DeskMosaic"
+          file "$app_path/Contents/MacOS/DeskMosaic"
+
+      - name: Import Developer ID certificate
+        if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/macassistant-signing.keychain-db"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$MACOS_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Sign with Developer ID and verify application
+        if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+        run: |
+          if [ -z "$DEVELOPER_ID_APPLICATION" ]; then
+            echo "::error::已配置证书，但缺少 DEVELOPER_ID_APPLICATION"
+            exit 1
+          fi
+          app_path="build-release/Build/Products/Release/DeskMosaic.app"
+          bash scripts/bundle-macos-translation-runtimes.sh "$app_path" "$DEVELOPER_ID_APPLICATION"
+          bash scripts/bundle-macos-recording-encoder.sh "$app_path" "$DEVELOPER_ID_APPLICATION" build/recording-macos
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --entitlements "MACAssistant/MACAssistant.entitlements" \
+            --sign "$DEVELOPER_ID_APPLICATION" \
+            "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          codesign --display --verbose=2 "$app_path"
+          lipo -info "$app_path/Contents/MacOS/DeskMosaic"
+          file "$app_path/Contents/MacOS/DeskMosaic"
+
+      - name: Create drag-to-Applications DMG
+        run: |
+          app_path="build-release/Build/Products/Release/DeskMosaic.app"
+          mkdir -p release
+          chmod +x scripts/create-dmg.sh
+          scripts/create-dmg.sh \
+            "$app_path" \
+            "release/DeskMosaic-macos-arm64.dmg"
+
+      - name: Notarize and staple DMG
+        if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::Developer ID 构建必须同时配置 APPLE_ID、APPLE_APP_SPECIFIC_PASSWORD、APPLE_TEAM_ID"
+            exit 1
+          fi
+          dmg_path="release/DeskMosaic-macos-arm64.dmg"
+          xcrun notarytool submit "$dmg_path" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg_path"
+          xcrun stapler validate "$dmg_path"
+
+      - name: Verify packaged application
+        run: |
+          dmg_path="release/DeskMosaic-macos-arm64.dmg"
+          mount_point="$RUNNER_TEMP/macassistant-verify"
+          mkdir -p "$mount_point"
+          hdiutil attach -readonly -noverify -noautoopen -mountpoint "$mount_point" "$dmg_path"
+          codesign --verify --deep --strict --verbose=2 "$mount_point/DeskMosaic.app"
+          contents="$mount_point/DeskMosaic.app/Contents"
+          "$contents/Helpers/streaming-asr" --check "$contents/Frameworks/libsherpa-onnx-c-api.dylib"
+          "$contents/Helpers/streaming-asr" --check-diarization "$contents/Frameworks/Diarization/libnemo_speech_asr_c.dylib"
+          "$contents/Helpers/streaming-asr" --check-vad "$contents/Frameworks/libsherpa-onnx-c-api.dylib" "$contents/Resources/silero_vad.onnx"
+          "$contents/Helpers/llama-server" --help >/dev/null
+          python3 scripts/check-recording-encoder.py "$mount_point/DeskMosaic.app/Contents/Helpers/ffmpeg"
+          test -L "$mount_point/Applications"
+          test "$(readlink "$mount_point/Applications")" = "/Applications"
+          test -f "$mount_point/.DS_Store"
+          test -f "$mount_point/.background/installer-background.png"
+          hdiutil detach "$mount_point"
+
+      - name: Verify Gatekeeper acceptance
+        if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
+        run: |
+          spctl --assess --type open --context context:primary-signature --verbose=4 \
+            "release/DeskMosaic-macos-arm64.dmg"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macassistant-macos-arm64
+          path: release/DeskMosaic-macos-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS recording encoder source
+        uses: actions/upload-artifact@v4
+        with:
+          name: recording-encoder-source-macos
+          path: release/recording-encoder-source-macos.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build-windows:
+    if: ${{ inputs.build_windows }}
+    name: Build Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore Windows project
+        run: dotnet restore WinAssistant/WinAssistant.csproj
+
+      - name: Build Windows project
+        run: >
+          dotnet build WinAssistant/WinAssistant.csproj
+          --configuration Release
+          --no-restore
+          -p:PublishSingleFile=false
+
+      - name: Verify brush cursor masks and native loading
+        run: dotnet run --project tests/ScreenshotCursorChecks/ScreenshotCursorChecks.csproj --configuration Release
+
+      - name: Verify multiline screenshot text layout and export
+        run: dotnet run --project tests/ScreenshotTextChecks/ScreenshotTextChecks.csproj --configuration Release
+
+      - name: Fetch Windows translation runtimes
+        shell: bash
+        run: |
+          bash scripts/fetch-translation-runtimes.sh windows build/translation-windows
+          python -m pip install ziglang==0.15.2
+          bash scripts/bundle-windows-streaming-runtime.sh build/translation-windows
+
+      - name: Verify bundled Windows engines
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP "translation-runtimes"
+          Expand-Archive build/translation-windows/llama.zip (Join-Path $destination "llama")
+          Expand-Archive build/translation-windows/llama-vulkan.zip (Join-Path $destination "llama-vulkan")
+          foreach ($name in @("llama-server.exe", "ggml-vulkan.dll")) {
+            if (!(Test-Path (Join-Path $destination "llama-vulkan/$name"))) {
+              throw "Vulkan runtime is missing $name"
+            }
+          }
+          Expand-Archive build/translation-windows/streaming.zip (Join-Path $destination "streaming")
+          & (Join-Path $destination "streaming/streaming-asr.exe") --check -
+          if ($LASTEXITCODE -ne 0) { throw "Bundled streaming recognition engine failed to load" }
+          & (Join-Path $destination "streaming/streaming-asr.exe") --check-vad - (Join-Path $destination "streaming/silero_vad.onnx")
+          if ($LASTEXITCODE -ne 0) { throw "Bundled microphone detector failed to load" }
+          & (Join-Path $destination "streaming/streaming-asr.exe") --check-diarization -
+          if ($LASTEXITCODE -ne 0) { throw "Bundled streaming diarization engine failed to load" }
+          & (Join-Path $destination "llama/llama-server.exe") --help
+          if ($LASTEXITCODE -ne 0) { throw "Bundled translation engine failed to start" }
+
+      - name: Install Windows recording encoder build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            make python curl tar xz
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-nasm
+
+      - name: Build Windows recording encoder
+        shell: msys2 {0}
+        run: |
+          bash scripts/build-recording-encoder.sh windows build/recording-windows
+          mkdir -p release
+          cp build/recording-windows/recording-encoder-source.zip release/recording-encoder-source-windows.zip
+
+      - name: Verify Windows recording encoder
+        run: python scripts/check-recording-encoder.py build/recording-windows/ffmpeg.exe
+
+      - name: Publish self-contained single-file EXE
+        shell: pwsh
+        run: |
+          dotnet publish WinAssistant/WinAssistant.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --no-restore `
+            -p:PublishSingleFile=true `
+            -p:RequireBundledTranslation=true `
+            -p:RequireBundledRecordingEncoder=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            --output publish-windows
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $source = Join-Path "publish-windows" "DeskMosaic.exe"
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "未找到 Windows 发布产物：$source"
+          }
+          Copy-Item -LiteralPath $source -Destination "release/DeskMosaic-windows-x64.exe"
+
+      - name: Verify Windows package
+        shell: pwsh
+        run: |
+          $exe = "release/DeskMosaic-windows-x64.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Windows EXE 不存在"
+          }
+          $item = Get-Item -LiteralPath $exe
+          if ($item.Length -lt 1MB) {
+            throw "Windows EXE 体积异常：$($item.Length) bytes"
+          }
+          $check = Start-Process -FilePath $exe -ArgumentList "--verify-recording-encoder" -Wait -PassThru
+          if ($check.ExitCode -ne 0) {
+            throw "Windows 发布 EXE 无法提取或启动内置录屏编码器"
+          }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $exe
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: winassistant-windows-x64
+          path: release/DeskMosaic-windows-x64.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows recording encoder source
+        uses: actions/upload-artifact@v4
+        with:
+          name: recording-encoder-source-windows
+          path: release/recording-encoder-source-windows.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: >-
+      ${{ !cancelled() && inputs.create_release &&
+          (inputs.build_macos || inputs.build_windows) &&
+          (!inputs.build_macos || needs.build-macos.result == 'success') &&
+          (!inputs.build_windows || needs.build-windows.result == 'success') }}
+    needs:
+      - build-macos
+      - build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::创建 Release 时必须填写 release_tag，例如 v1.0.0"
+            exit 1
+          fi
+
+      - name: Download DMG
+        if: ${{ inputs.build_macos }}
+        uses: actions/download-artifact@v4
+        with:
+          name: macassistant-macos-arm64
+          path: release-assets
+
+      - name: Download EXE
+        if: ${{ inputs.build_windows }}
+        uses: actions/download-artifact@v4
+        with:
+          name: winassistant-windows-x64
+          path: release-assets
+
+      - name: Download recording encoder sources
+        uses: actions/download-artifact@v4
+        with:
+          pattern: recording-encoder-source-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create release
+        run: |
+          shopt -s nullglob
+          assets=(release-assets/*.dmg release-assets/*.exe release-assets/recording-encoder-source-*.zip)
+          options=(--target "$GITHUB_SHA" --generate-notes --title "DeskMosaic $RELEASE_TAG")
+          if [[ "$PRERELEASE" == "true" ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" "${options[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TAG: ${{ inputs.release_tag }}

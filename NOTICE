@@ -1,0 +1,21 @@
+DeskMosaic
+Copyright 2026 MAC Assistant contributors
+
+The scroll input classification approach was informed by Scroll Reverser:
+https://github.com/pilotmoon/Scroll-Reverser
+
+Scroll Reverser is licensed under the Apache License, Version 2.0.
+Copyright (c) Nick Moore.
+
+The project's original code and documentation are distributed under the MIT
+License in LICENSE. Third-party components and separately downloaded model
+weights remain under their respective licenses.
+
+Desktop packages include a separate recording executable built from FFmpeg
+and x264 with GPL components enabled. The corresponding source, license
+texts, and build script are published alongside each desktop package in
+recording-encoder-source-macos.zip or recording-encoder-source-windows.zip.
+
+Bundled speech and translation runtime license notices ship with those
+runtimes. The offline notebook editor's vendored licenses are in
+Notebook/NotebookWeb/vendor/vditor and its distribution subdirectories.

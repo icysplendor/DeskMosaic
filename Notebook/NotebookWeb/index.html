@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' data: blob:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-src 'none'"
+    />
+    <title>笔记本</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#f8fbff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" href="app-icon-512.png" />
+    <link rel="icon" href="app-icon.png" />
+    <link rel="stylesheet" href="vendor/vditor/dist/index.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="titlebar">
+      <button id="web-back" class="web-only" aria-label="返回笔记列表">
+        ‹
+      </button>
+      <button id="web-books" class="web-only" aria-label="打开笔记本">
+        ☰
+      </button>
+      <img src="app-emblem.png" alt="应用图标" /><strong>笔记本</strong
+      ><span class="drag-space"></span
+      ><span id="web-sync-state" class="web-only"></span>
+      <button id="theme" title="切换浅色或深色" aria-label="切换主题">
+        <i data-lucide="sun-moon"></i>
+      </button>
+      <div id="window-controls">
+        <button data-window="minimize" aria-label="最小化">
+          <i data-lucide="minus"></i></button
+        ><button data-window="maximize" aria-label="最大化或还原">
+          <i data-lucide="square"></i></button
+        ><button data-window="close" aria-label="关闭笔记窗口">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+    </header>
+    <div id="workspace">
+      <aside id="books">
+        <button id="library" class="library">
+          <i data-lucide="library"></i><b>我的笔记库</b
+          ><i data-lucide="chevron-down"></i></button
+        ><button class="navigation" data-filter="all">
+          <i data-lucide="files"></i>全部笔记</button
+        ><button class="navigation" data-filter="recent">
+          <i data-lucide="clock"></i>最近使用
+        </button>
+        <button id="quick-notes" class="navigation" data-filter="quick-notes">
+          <i data-lucide="notebook-pen"></i>快速笔记
+        </button>
+        <div class="section-label">
+          笔记本<button id="new-book" aria-label="新建笔记本">
+            <i data-lucide="plus"></i>
+          </button>
+        </div>
+        <nav id="book-list"></nav>
+        <div class="sidebar-bottom">
+          <button id="trash" class="navigation">
+            <i data-lucide="trash-2"></i>回收站</button
+          ><button id="sync-settings" class="sync">
+            <i data-lucide="cloud"></i><span id="sync-status">仅保存在本地</span
+            ><i data-lucide="settings-2"></i></button
+          ><button id="sync-now" class="subtle">立即同步</button>
+          <button id="sync-results" class="subtle">同步结果</button>
+        </div>
+      </aside>
+      <aside id="notes">
+        <div class="list-heading">
+          <h2 id="list-title">全部笔记</h2>
+          <button id="new-note" class="primary" aria-label="新建笔记">
+            <i data-lucide="plus"></i>
+          </button>
+        </div>
+        <label class="search"
+          ><i data-lucide="search"></i
+          ><input id="search" placeholder="搜索笔记内容…" aria-label="搜索笔记"
+        /></label>
+        <div id="note-list"></div>
+      </aside>
+      <main>
+        <div id="note-toolbar">
+          <button id="web-note-list" class="web-only" aria-label="笔记列表">
+            ‹
+          </button>
+          <span id="breadcrumb">选择或新建笔记</span>
+          <div class="mode-switch">
+            <button id="preview-mode" class="active">可编辑预览</button
+            ><button id="source-mode">源码</button>
+          </div>
+          <button id="attachments">
+            <i data-lucide="paperclip"></i><span>附件</span></button
+          ><button id="note-actions" aria-label="笔记操作">
+            <i data-lucide="ellipsis"></i>
+          </button>
+        </div>
+        <section id="trash-page" hidden>
+          <div class="trash-heading">
+            <div>
+              <h1>回收站</h1>
+              <p class="muted">管理已删除的笔记本、笔记和附件</p>
+            </div>
+            <button id="trash-close">返回笔记</button>
+          </div>
+          <p class="trash-description">
+            笔记本与笔记可完整恢复；附件回收满 15
+            天自动清理。永久删除无法撤销，并会在同步时传播。
+          </p>
+          <div id="deleted-list"></div>
+        </section>
+        <div id="empty">
+          <i data-lucide="notebook-pen"></i>
+          <h1>让正文和附件一起归档</h1>
+          <p>先创建一个笔记本，再写下第一篇笔记。</p>
+          <button id="empty-create" class="primary">新建笔记本</button>
+        </div>
+        <div id="mobile-edit-controls">
+          <button id="mobile-edit" class="primary">开启编辑</button>
+          <button id="mobile-display">选项</button>
+        </div>
+        <div id="editor"></div>
+        <section id="attachment-drawer" hidden>
+          <div class="drawer-heading">
+            <h2>附件管理</h2>
+            <span id="attachment-scope"></span
+            ><button id="add-attachment">
+              <i data-lucide="paperclip"></i>添加文件</button
+            ><button id="close-drawer" aria-label="收起附件面板">
+              <i data-lucide="chevron-down"></i>
+            </button>
+          </div>
+          <div class="drawer-tabs">
+            <button data-attachment-tab="live" class="active">正在引用</button
+            ><button data-attachment-tab="pending">待回收</button
+            ><button data-attachment-tab="trash">已回收</button>
+          </div>
+          <div id="attachment-list"></div>
+          <p class="muted">回收附件保留 15 天；撤销删除会自动恢复附件。</p>
+        </section>
+        <footer>
+          <span id="save-status">准备就绪</span
+          ><span id="maintenance-status"></span
+          ><span
+            id="remote-status"
+            role="button"
+            tabindex="0"
+            aria-label="查看同步结果"
+          ></span>
+        </footer>
+      </main>
+    </div>
+    <nav id="mobile-nav" aria-label="手机导航">
+      <button id="mobile-books">
+        <i data-lucide="library"></i><span>笔记本</span>
+      </button>
+      <button id="mobile-notes">
+        <i data-lucide="files"></i><span>笔记</span>
+      </button>
+      <button id="mobile-sync">
+        <i data-lucide="refresh-cw"></i><span>同步</span>
+      </button>
+      <button id="mobile-theme">
+        <i data-lucide="sun-moon"></i><span>主题</span>
+      </button>
+    </nav>
+    <div id="toast" role="status" hidden></div>
+    <dialog id="text-dialog">
+      <form method="dialog">
+        <h2 id="text-title"></h2>
+        <input id="text-value" required maxlength="100" />
+        <div class="dialog-actions">
+          <button id="text-cancel" type="button">取消</button
+          ><button type="submit" value="ok" class="primary">确定</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="sync-dialog">
+      <h2>笔记库与同步</h2>
+      <p class="muted">
+        本地副本始终可离线编辑。首次同步会上传现有笔记，并保留在线同名冲突。
+      </p>
+      <label
+        >Nextcloud WebDAV 文件夹地址<input
+          id="dav-url"
+          type="url"
+          placeholder="https://cloud.example.com/remote.php/dav/files/user/Notes/" /></label
+      ><label>用户名<input id="dav-user" autocomplete="username" /></label
+      ><label
+        >应用密码<input
+          id="dav-password"
+          type="password"
+          autocomplete="new-password"
+          placeholder="已配置时留空以保留原密码" /></label
+      ><label class="inline"
+        ><input
+          id="dav-enabled"
+          type="checkbox"
+        />启用自动同步（每五分钟）</label
+      ><label
+        >附件回收保护时间（秒）<input
+          id="grace"
+          type="number"
+          min="5"
+          max="3600"
+          value="30"
+      /></label>
+      <p class="muted">
+        每 5 分钟双向同步一次；本地文件始终保留，绑定网盘不会迁移笔记库。
+      </p>
+      <div class="dialog-actions">
+        <button id="sync-report-open">同步结果</button>
+        <button id="open-root">打开本地目录</button
+        ><button id="maintenance">立即巡检</button>
+      </div>
+      <div class="dialog-actions">
+        <button id="sync-cancel">关闭</button
+        ><button id="sync-save" class="primary">保存并校验连接</button>
+      </div>
+      <p id="sync-error" role="alert"></p>
+      <div class="web-only web-settings">
+        <p id="offline-status" class="muted">正在准备离线应用…</p>
+        <button id="web-export">导出本机备份</button
+        ><button id="web-logout">退出登录</button>
+      </div>
+    </dialog>
+    <dialog id="action-dialog">
+      <h2>笔记操作</h2>
+      <button id="rename-note">重命名</button
+      ><label>移动到笔记本<select id="move-book"></select></label
+      ><button id="move-note">移动笔记（含附件）</button
+      ><button id="delete-note" class="danger">移入回收站</button
+      ><button id="action-close">关闭</button>
+    </dialog>
+    <dialog id="conflict-dialog">
+      <h2>同步冲突</h2>
+      <p class="muted">
+        双方版本已保留，正文可展开对照并手动合并。选择版本后这篇笔记恢复同步，其他笔记可继续同步；处理前可打开本地目录检查
+        .conflicts 文件夹。
+      </p>
+      <div id="conflict-list"></div>
+      <button id="conflict-close">关闭</button>
+    </dialog>
+    <dialog id="sync-report-dialog" aria-labelledby="sync-report-heading">
+      <h2 id="sync-report-heading">同步结果</h2>
+      <p id="sync-report-summary" role="status"></p>
+      <p class="muted">
+        每篇笔记连同正文、元数据及需要传输的附件作为一项。未完成的项目保留本地内容，其他项目继续同步。
+      </p>
+      <div id="sync-report-list"></div>
+      <div class="dialog-actions">
+        <button id="sync-report-conflicts" hidden>处理冲突</button>
+        <button id="sync-report-retry">重新同步</button>
+        <button id="sync-report-close">关闭</button>
+      </div>
+    </dialog>
+    <input id="file-input" type="file" multiple hidden />
+    <script
+      id="vditorIconScript"
+      src="vendor/vditor/dist/js/icons/ant.js"
+    ></script>
+    <script src="vendor/vditor/dist/index.min.js"></script>
+    <script
+      id="vditorHljsScript"
+      src="vendor/vditor/dist/js/highlight.js/highlight.min.js"
+    ></script>
+    <script
+      id="vditorHljsThirdScript"
+      src="vendor/vditor/dist/js/highlight.js/third-languages.js"
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>

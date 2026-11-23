@@ -1,0 +1,210 @@
+.code-window {
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 48px auto minmax(0, 1fr) auto;
+}
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  background: var(--title);
+  border-bottom: 1px solid var(--line);
+}
+.code-header strong {
+  font-size: 14px;
+}
+#edit-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+#edit-state[data-dirty="true"] {
+  color: var(--accent);
+}
+.code-header-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.code-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.code-tools button {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.code-tools label {
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.code-tools select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 12px) 50%,
+    calc(100% - 8px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  width: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 6px;
+  padding-right: 24px;
+  background-color: var(--panel);
+  color: var(--text);
+}
+#language {
+  min-width: 100px;
+  max-width: 160px;
+}
+.wrap-option input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+#code-editor {
+  min-height: 0;
+  overflow: hidden;
+  background: var(--code);
+}
+.code-footer {
+  /* The main notebook's footer has a fixed 34px height. This footer must
+     include its buttons and padding, including when the stats wrap. */
+  height: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.code-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.code-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  margin-left: auto;
+}
+.code-actions button {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+#editor-message {
+  font-size: 12px;
+  color: var(--muted);
+}
+.code-window .cm-editor {
+  height: 100%;
+  background: var(--code);
+  color: var(--text);
+}
+.code-window .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--editor-font-size, 14px);
+  line-height: 1.6;
+}
+.code-window .cm-content {
+  padding: 12px 0;
+  caret-color: var(--text);
+}
+.code-window .cm-line {
+  padding: 0 16px 0 10px;
+}
+.code-window .cm-gutters {
+  color: var(--muted);
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.code-window .cm-activeLine,
+.code-window .cm-activeLineGutter {
+  background: rgba(36, 107, 254, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.code-window .cm-editor.cm-focused {
+  outline: none;
+}
+.code-window .cm-editor.cm-focused .cm-selectionBackground,
+.code-window .cm-selectionBackground,
+.code-window .cm-content ::selection {
+  background: var(--selected) !important;
+}
+.code-window .cm-selectionMatch {
+  background: rgba(36, 107, 254, 0.12);
+}
+.code-window .cm-cursor {
+  border-left-color: var(--text);
+}
+.code-window .cm-matchingBracket {
+  background: var(--selected);
+  outline: 1px solid var(--accent);
+}
+.code-window .cm-panels,
+.code-window .cm-tooltip {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--line);
+}
+.code-window .cm-textfield {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.code-window .cm-button {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-transform: none;
+}
+.code-window .cm-searchMatch {
+  background: #f6c34455;
+}
+.code-window .cm-searchMatch-selected {
+  background: #f6c34499;
+}
+:root {
+  --syntax-keyword: #8250df;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-comment: #6e7781;
+  --syntax-function: #8250df;
+}
+:root[data-theme="dark"] {
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #9aabc2;
+  --syntax-function: #d2a8ff;
+}
+@media (max-width: 740px) {
+  .code-header-hint,
+  .encoding {
+    display: none;
+  }
+  .code-stats {
+    gap: 4px 8px;
+  }
+}
