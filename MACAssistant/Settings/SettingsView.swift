@@ -65,18 +65,18 @@ struct SettingsView: View {
         ZStack {
             WindowDragRegion()
             HStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    windowControl(color: Color(red: 1, green: 0.37, blue: 0.34), symbol: "×", help: t("关闭", "Close")) {
+                HStack(spacing: 0) {
+                    windowControl(color: Color(red: 1, green: 0.37, blue: 0.34), symbol: "xmark", help: t("关闭", "Close")) {
                         activeWindow?.performClose(nil)
                     }
-                    windowControl(color: Color(red: 1, green: 0.74, blue: 0.22), symbol: "−", help: t("最小化", "Minimize")) {
+                    windowControl(color: Color(red: 1, green: 0.74, blue: 0.22), symbol: "minus", help: t("最小化", "Minimize")) {
                         activeWindow?.miniaturize(nil)
                     }
-                    windowControl(color: Color(red: 0.18, green: 0.78, blue: 0.35), symbol: "+", help: t("缩放", "Zoom")) {
+                    windowControl(color: Color(red: 0.18, green: 0.78, blue: 0.35), symbol: "plus", help: t("缩放", "Zoom")) {
                         activeWindow?.zoom(nil)
                     }
                 }
-                .padding(.trailing, 14)
+                .padding(.trailing, 10)
 
                 Image("AppEmblem")
                     .resizable()
@@ -145,13 +145,15 @@ struct SettingsView: View {
                 .fill(color)
                 .frame(width: 14, height: 14)
                 .overlay {
-                    Text(symbol)
-                        .font(.system(size: 9, weight: .bold))
+                    Image(systemName: symbol)
+                        .font(.system(size: 7, weight: .bold))
                         .foregroundStyle(Color.black.opacity(0.58))
                 }
-                .contentShape(Circle())
+                .frame(width: 22, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(help)
         .help(help)
     }
 

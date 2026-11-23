@@ -1623,9 +1623,8 @@ private final class ScreenshotSession {
     }
 
     private var toolbarTitles: [String] {
-        ScreenshotTool.allCases.map(\.title)
-            + ["", "", "像素", "撤销", "保存", "完成"] + (recording == nil ? [] : ["操作"])
-            + [isStartingRecording ? "启动中" : recording == nil ? "录屏" : "停止"]
+        let actions = recording == nil ? [isStartingRecording ? "启动中" : "录屏", "完成"] : ["完成", "操作", "停止"]
+        return ScreenshotTool.allCases.map(\.title) + ["", "", "像素", "撤销", "保存"] + actions
     }
 
     private var compactPaletteButtonIndex: Int {
@@ -1649,11 +1648,11 @@ private final class ScreenshotSession {
     }
 
     private var finishButtonIndex: Int {
-        saveButtonIndex + 1
+        saveButtonIndex + (recording == nil ? 2 : 1)
     }
 
-    private var desktopButtonIndex: Int { finishButtonIndex + 1 }
-    private var recordButtonIndex: Int { desktopButtonIndex + (recording == nil ? 0 : 1) }
+    private var desktopButtonIndex: Int { saveButtonIndex + 2 }
+    private var recordButtonIndex: Int { saveButtonIndex + (recording == nil ? 1 : 3) }
 
     private func toolbarButtonWidth(index: Int) -> CGFloat {
         if index == recordButtonIndex { return 50 }

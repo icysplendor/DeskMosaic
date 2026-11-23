@@ -11,6 +11,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     private var maintenanceTimer: Timer?
     private var syncTimer: Timer?
     private var codeEditor: NotebookCodeWindow?
+    private(set) var needsFlushBeforeQuit = false
     private lazy var service = NotebookService(theme: SettingsManager.shared.theme)
 
     func start() {
@@ -78,6 +79,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         if let codeEditor { NSApp.activate(ignoringOtherApps: true); codeEditor.show(); return }
         pendingIntent = intent
         start(); guard let window else { return }
+        needsFlushBeforeQuit = true
         if window.isMiniaturized { window.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil); navigate()
     }
@@ -87,7 +89,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         if codeEditor != nil {
             throw NSError(domain: "Notebook", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先保存或关闭代码编辑窗口"])
         }
-        guard ready, let browser else { return }
+        guard needsFlushBeforeQuit, ready, let browser else { return }
         let script = """
         await Promise.race([
           window.notebookFlush(),
@@ -98,7 +100,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if let codeEditor { codeEditor.show(); return false }
-        guard ready else { sender.orderOut(nil); return false }
+        guard ready else { needsFlushBeforeQuit = false; sender.orderOut(nil); return false }
         browser?.evaluateJavaScript("window.notebookClose?.()", completionHandler: nil); return false
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -141,7 +143,9 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
                     if let string = args["url"] as? String, let url = URL(string: string), ["https", "http"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
                 case "window":
                     switch args["action"] as? String {
-                    case "close": window?.orderOut(nil)
+                    case "close":
+                        needsFlushBeforeQuit = false
+                        window?.orderOut(nil)
                     case "minimize": window?.miniaturize(nil)
                     case "maximize": window?.zoom(nil)
                     case "drag": if let event = NSApp.currentEvent { window?.performDrag(with: event) }

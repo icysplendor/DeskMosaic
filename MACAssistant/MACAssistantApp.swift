@@ -11,6 +11,7 @@ struct MACAssistantApp: App {
     var body: some Scene {
         MenuBarExtra {
             MenuContentView()
+                .environmentObject(appDelegate)
                 .environmentObject(displays)
                 .environmentObject(mouseScroll)
                 .environmentObject(settings)

@@ -27,11 +27,12 @@ internal sealed class ScreenshotSession : IDisposable
     private const int SizeButtonIndex = 7;
     private const int UndoButtonIndex = 8;
     private const int SaveButtonIndex = 9;
-    private const int FinishButtonIndex = 10;
+    private const int CaptureRecordButtonIndex = 10;
     private const int DesktopButtonIndex = 11;
     private const int RecordingStopButtonIndex = 12;
-    private int RecordButtonIndex => recording is null ? DesktopButtonIndex : RecordingStopButtonIndex;
-    private int ToolbarButtonCount => RecordButtonIndex + 1;
+    private int FinishButtonIndex => recording is null ? DesktopButtonIndex : CaptureRecordButtonIndex;
+    private int RecordButtonIndex => recording is null ? CaptureRecordButtonIndex : RecordingStopButtonIndex;
+    private int ToolbarButtonCount => (recording is null ? DesktopButtonIndex : RecordingStopButtonIndex) + 1;
 
     private readonly IReadOnlyList<CapturedMonitor> monitors;
     private readonly IReadOnlyList<WindowCandidate> windowCandidates;
@@ -931,8 +932,8 @@ internal sealed class ScreenshotSession : IDisposable
                 SizeButtonIndex => "像素",
                 UndoButtonIndex => "撤销",
                 SaveButtonIndex => "保存",
-                FinishButtonIndex => "完成",
-                DesktopButtonIndex => recording is null ? "录屏" : "操作",
+                CaptureRecordButtonIndex => recording is null ? "录屏" : "完成",
+                DesktopButtonIndex => recording is null ? "完成" : "操作",
                 RecordingStopButtonIndex => "停止",
                 _ => ""
             };
@@ -1370,16 +1371,15 @@ internal sealed class ScreenshotSession : IDisposable
                     showsMoreColors = false;
                     Save();
                     break;
-                case FinishButtonIndex:
+                case var button when button == FinishButtonIndex:
                     Finish();
                     break;
+                case CaptureRecordButtonIndex:
+                    StartRecording();
+                    break;
                 case DesktopButtonIndex:
-                    if (recording is null) StartRecording();
-                    else
-                    {
-                        activeTool = null;
-                        showsMoreColors = false;
-                    }
+                    activeTool = null;
+                    showsMoreColors = false;
                     break;
                 case RecordingStopButtonIndex:
                     EndRecording();

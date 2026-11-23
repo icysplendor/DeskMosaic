@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuContentView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appDelegate: AppDelegate
     @EnvironmentObject private var displays: DisplayManager
     @EnvironmentObject private var mouseScroll: MouseScrollManager
     @EnvironmentObject private var settings: SettingsManager
@@ -210,7 +211,10 @@ struct MenuContentView: View {
             }
             HStack(spacing: 8) {
                 footerButton(t("设置", "Settings")) { SettingsWindowController.shared.show() }
-                footerButton(t("退出", "Quit")) { NSApp.terminate(nil) }
+                footerButton(appDelegate.isPreparingToQuit ? t("正在退出…", "Quitting…") : t("退出", "Quit")) {
+                    NSApp.terminate(nil)
+                }
+                .disabled(appDelegate.isPreparingToQuit)
             }
         }
         .padding(8)

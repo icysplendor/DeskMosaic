@@ -55,10 +55,12 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         engine?.stop()
     }
 
-    func stopAndWait() async {
+    func stopAndWait() async -> String? {
         let current = job
+        let wasRecording = recording
         stop()
         await current?.value
+        return wasRecording && failed ? status : nil
     }
 
     func windowWillClose(_ notification: Notification) { stop() }

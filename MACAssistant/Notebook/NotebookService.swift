@@ -1,5 +1,5 @@
+import CryptoKit
 import Foundation
-import Security
 
 struct NotebookPreferences: Codable {
     var root: String?
@@ -19,9 +19,76 @@ struct NotebookPreferences: Codable {
     }
 }
 
+struct NotebookCredentialStore {
+    let directory: URL
+    private let files = FileManager.default
+
+    init(directory: URL) {
+        self.directory = directory
+    }
+
+    func load(url: String, user: String) throws -> String? {
+        let identity = accountIdentity(url: url, user: user)
+        let file = credentialFile(identity)
+        guard files.fileExists(atPath: file.path) else { return nil }
+        let box = try AES.GCM.SealedBox(combined: Data(contentsOf: file))
+        let data = try AES.GCM.open(box, using: readKey(), authenticating: identity)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func save(_ password: String, url: String, user: String) throws {
+        try files.createDirectory(at: directory, withIntermediateDirectories: true,
+                                  attributes: [.posixPermissions: 0o700])
+        try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        let identity = accountIdentity(url: url, user: user)
+        let key = try loadOrCreateKey()
+        let box = try AES.GCM.seal(Data(password.utf8), using: key, authenticating: identity)
+        guard let sealed = box.combined else { throw CocoaError(.fileWriteUnknown) }
+        try writePrivate(sealed, to: credentialFile(identity))
+    }
+
+    private var keyFile: URL { directory.appendingPathComponent("credential.key") }
+
+    private func accountIdentity(url: String, user: String) -> Data {
+        Data("\(url.utf8.count):\(url)\(user)".utf8)
+    }
+
+    private func credentialFile(_ identity: Data) -> URL {
+        let name = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+        return directory.appendingPathComponent(name + ".aesgcm")
+    }
+
+    private func readKey() throws -> SymmetricKey {
+        let data = try Data(contentsOf: keyFile)
+        guard data.count == 32 else { throw CocoaError(.fileReadCorruptFile) }
+        return SymmetricKey(data: data)
+    }
+
+    private func loadOrCreateKey() throws -> SymmetricKey {
+        if files.fileExists(atPath: keyFile.path) { return try readKey() }
+        let temporary = directory.appendingPathComponent("." + UUID().uuidString)
+        let key = SymmetricKey(size: .bits256)
+        defer { try? files.removeItem(at: temporary) }
+        try writePrivate(key.withUnsafeBytes { Data($0) }, to: temporary)
+        // Publish the complete key without replacing one created by another instance.
+        do { try files.linkItem(at: temporary, to: keyFile) }
+        catch {
+            guard files.fileExists(atPath: keyFile.path) else { throw error }
+            return try readKey()
+        }
+        return key
+    }
+
+    private func writePrivate(_ data: Data, to file: URL) throws {
+        try data.write(to: file, options: .atomic)
+        try files.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+}
+
 actor NotebookService {
     private let fm = FileManager.default
     private let config: URL
+    private let credentials: NotebookCredentialStore
     private var preferences: NotebookPreferences
     private let initialTheme: String
 
@@ -29,6 +96,8 @@ actor NotebookService {
         initialTheme = theme
         config = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MACAssistant/Notebook/preferences.json")
+        credentials = NotebookCredentialStore(directory: config.deletingLastPathComponent()
+            .appendingPathComponent("Credentials", isDirectory: true))
         let candidates = [config, URL(fileURLWithPath: config.path + ".bak")]
         preferences = candidates.compactMap { url -> NotebookPreferences? in
             guard let data = try? Data(contentsOf: url) else { return nil }
@@ -134,20 +203,8 @@ actor NotebookService {
         default: throw failure("未知笔记服务操作")
         }
     }
-    private func credentialKey(_ config: NotebookPreferences) -> String { config.url + "|" + config.user }
-    private func password(_ config: NotebookPreferences) throws -> String {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "MACAssistant.Notebook.WebDAV", kSecAttrAccount as String: credentialKey(config), kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data, let value = String(data: data, encoding: .utf8) else { throw failure("请填写 Nextcloud 应用密码") }
-        return value
-    }
-    private func setPassword(_ value: String, config: NotebookPreferences) throws {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "MACAssistant.Notebook.WebDAV", kSecAttrAccount as String: credentialKey(config)]
-        let attributes: [String: Any] = [kSecValueData as String: Data(value.utf8)]
-        var result = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if result == errSecItemNotFound { result = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil) }
-        guard result == errSecSuccess else { throw failure("无法安全保存 WebDAV 密码") }
-    }
+    private func missingPassword() -> NSError { failure("请在笔记本同步设置中填写 Nextcloud 应用密码并保存") }
+
     func configure(_ args: [String: Any]) async throws -> [String: Any] {
         var next = preferences
         next.url = (args["url"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,22 +215,28 @@ actor NotebookService {
             next.url = next.url.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/"
             guard !next.user.isEmpty else { throw failure("请输入用户名") }
         }
-        if let value = args["password"] as? String, !value.isEmpty { try setPassword(value, config: next) }
+        let newPassword = (args["password"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         if next.enabled {
-            let response = try await request(next, method: "PROPFIND", path: "", body: nil, headers: ["Depth": "0"])
+            let response = try await request(next, method: "PROPFIND", path: "", body: nil,
+                                             headers: ["Depth": "0"], password: newPassword)
             guard response["status"] as? Int == 207 else { throw failure("WebDAV 连接校验失败 (\(response["status"] ?? "未知"))") }
         }
+        if let newPassword { try credentials.save(newPassword, url: next.url, user: next.user) }
         if next.url != preferences.url || next.user != preferences.user {
             let baseline = try resolve(".sync.json")
             if fm.fileExists(atPath: baseline.path) { try fm.moveItem(at: baseline, to: URL(fileURLWithPath: baseline.path + ".previous-" + UUID().uuidString)) }
         }
         preferences = next; try savePreferences(); return settings()
     }
-    private func request(_ config: NotebookPreferences, method: String, path: String, body: String?, headers: [String: String]) async throws -> [String: Any] {
+    private func request(_ config: NotebookPreferences, method: String, path: String, body: String?,
+                         headers: [String: String], password: String? = nil) async throws -> [String: Any] {
         guard ["GET", "PUT", "DELETE", "PROPFIND", "MKCOL"].contains(method), !path.hasPrefix("/"), !path.contains("\\"), !path.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }), let base = URL(string: config.url) else { throw failure("同步请求无效") }
         let url = try NotebookDAVURL.resolve(base: base, path: path)
         var request = URLRequest(url: url, timeoutInterval: 60); request.httpMethod = method
-        let auth = Data("\(config.user):\(try password(config))".utf8).base64EncodedString()
+        guard let password = try password ?? credentials.load(url: config.url, user: config.user) else {
+            throw missingPassword()
+        }
+        let auth = Data("\(config.user):\(password)".utf8).base64EncodedString()
         request.setValue("Basic \(auth)", forHTTPHeaderField: "Authorization")
         // Keep GET ETags consistent with conditional WebDAV writes and lock release.
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
