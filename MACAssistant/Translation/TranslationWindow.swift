@@ -586,43 +586,34 @@ private struct TranslationWindowView: View {
     private func dropdown<Value: Hashable>(_ title: String, selection: Binding<Value>,
                                            choices: [(Value, String)], placeholder: String = "",
                                            width: CGFloat? = nil) -> some View {
-        let current = choices.first { $0.0 == selection.wrappedValue }?.1 ?? placeholder
-        return Menu {
-            ForEach(choices.map { $0.0 }, id: \.self) { value in
-                if let label = choices.first(where: { $0.0 == value })?.1 {
-                    Button { selection.wrappedValue = value } label: {
-                        if value == selection.wrappedValue {
-                            Label(label, systemImage: "checkmark")
-                        } else {
-                            Text(label)
-                        }
-                    }
-                }
+        let selectedIndex = choices.firstIndex { $0.0 == selection.wrappedValue }
+        let current = selectedIndex.map { choices[$0].1 } ?? placeholder
+        return HStack(spacing: 6) {
+            Text(current).lineLimit(1).frame(maxWidth: width == nil ? nil : .infinity, alignment: .leading)
+            Path { path in
+                path.move(to: CGPoint(x: 1, y: 1))
+                path.addLine(to: CGPoint(x: 5, y: 5))
+                path.addLine(to: CGPoint(x: 9, y: 1))
             }
-        } label: {
-            HStack(spacing: 6) {
-                Text(current).lineLimit(1).frame(maxWidth: width == nil ? nil : .infinity, alignment: .leading)
-                Path { path in
-                    path.move(to: CGPoint(x: 1, y: 1))
-                    path.addLine(to: CGPoint(x: 5, y: 5))
-                    path.addLine(to: CGPoint(x: 9, y: 1))
-                }
-                .stroke(dark ? Color(red: 0.67, green: 0.73, blue: 0.82) : Color(red: 0.32, green: 0.38, blue: 0.48),
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                .frame(width: 10, height: 6)
-                .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 8)
-            .frame(width: width, height: 22)
-            .background(dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : .white,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(line).allowsHitTesting(false))
+            .stroke(dark ? Color(red: 0.67, green: 0.73, blue: 0.82) : Color(red: 0.32, green: 0.38, blue: 0.48),
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            .frame(width: 10, height: 6)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .padding(.horizontal, 8)
+        .frame(width: width, height: 22)
+        .background(dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : .white,
+                    in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(line).allowsHitTesting(false))
+        .accessibilityHidden(true)
+        .overlay {
+            // macOS can reduce a SwiftUI Menu label to text, losing custom drawing.
+            CaptionPopup(title: title, items: choices.map { $0.1 }, selectedIndex: selectedIndex ?? -1) { index in
+                selection.wrappedValue = choices[index].0
+                // A canceled file picker leaves the audio source unchanged.
+                return choices.firstIndex { $0.0 == selection.wrappedValue } ?? -1
+            }
+        }
         .fixedSize()
-        .accessibilityLabel(title)
-        .accessibilityValue(current)
     }
 
     private func languageDropdown(_ title: String, selection: Binding<String>, available: [String]) -> some View {
@@ -713,6 +704,55 @@ private struct TranslationWindowView: View {
 
     private func t(_ chinese: String, _ english: String) -> String {
         settings.language == "en-US" ? english : chinese
+    }
+}
+
+private struct CaptionPopup: NSViewRepresentable {
+    let title: String
+    let items: [String]
+    let selectedIndex: Int
+    let onSelect: (Int) -> Int
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.isTransparent = true
+        popup.controlSize = .small
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        return popup
+    }
+
+    func updateNSView(_ popup: NSPopUpButton, context: Context) {
+        context.coordinator.onSelect = onSelect
+        popup.setAccessibilityLabel(title)
+        if popup.itemTitles != items {
+            popup.removeAllItems()
+            popup.addItems(withTitles: items)
+        }
+        if popup.indexOfSelectedItem != selectedIndex {
+            popup.selectItem(at: selectedIndex)
+        }
+        popup.isEnabled = context.environment.isEnabled && !items.isEmpty
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSPopUpButton, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: nsView.intrinsicContentSize)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var onSelect: ((Int) -> Int)?
+
+        @objc func selectionChanged(_ popup: NSPopUpButton) {
+            let index = popup.indexOfSelectedItem
+            guard index >= 0, let onSelect else { return }
+            let appliedIndex = onSelect(index)
+            if popup.indexOfSelectedItem != appliedIndex {
+                popup.selectItem(at: appliedIndex)
+            }
+        }
     }
 }
 
