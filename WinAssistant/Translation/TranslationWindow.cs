@@ -900,6 +900,7 @@ internal sealed class TranslationWindow : Window
             {
                 heading += " · " + T("说话人待确认", "Speaker unconfirmed");
             }
+            heading += " · " + item.TimeRange;
 
             var section = new StringBuilder($"## {MarkdownText(heading)}");
             if (source.Length > 0)

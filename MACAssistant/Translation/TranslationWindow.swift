@@ -251,6 +251,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             } else if identifiesSpeakers {
                 heading += " · " + t("说话人待确认", "Speaker unconfirmed")
             }
+            heading += " · " + item.timeRange
 
             var section = ["## \(markdownText(heading))"]
             if !source.isEmpty {
