@@ -4,12 +4,13 @@ using System.Security.Cryptography;
 
 namespace WinAssistant.Translation;
 
-internal sealed record TranslationModelDownload(string Url, string FileName, long Size, string Sha256)
+internal sealed record TranslationModelDownload(string Url, string FileName, long Size, string Sha256, string? PreferredUrl = null)
 {
     private Uri MirrorUrl
     {
         get
         {
+            if (PreferredUrl is not null) return new Uri(PreferredUrl);
             var source = new Uri(Url);
             return source.Host == "huggingface.co"
                 ? new UriBuilder(source) { Host = "hf-mirror.com" }.Uri
@@ -17,8 +18,10 @@ internal sealed record TranslationModelDownload(string Url, string FileName, lon
         }
     }
 
-    internal static readonly TranslationModelDownload Llama = new(TranslationOptions.LlamaModelUrl,
-        "Hy-MT2-1.8B-Q4_K_M.gguf", 1_133_080_448, "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699");
+    internal static readonly TranslationModelDownload Llama = new(
+        "https://huggingface.co/tencent/Hy-MT3-1.8B-GGUF/resolve/4c4370b31f13ccac4ac71133e3a0967c88cc792c/Hy-MT3-1.8B-Q4_K_M.gguf",
+        "Hy-MT3-1.8B-Q4_K_M.gguf", 1_348_432_160, "bae6e591103654ff43ef0de7d1492f6e6df1f955505f6bb2cc52e86fc399a942",
+        PreferredUrl: "https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT3-1.8B-GGUF/resolve/d90a5d2b61c8598c9cc313464bd74930f526fb2b/Hy-MT3-1.8B-Q4_K_M.gguf");
 
     internal static readonly TranslationModelDownload Lmt = new(
         "https://huggingface.co/mradermacher/LMT-60-0.6B-GGUF/resolve/86942b9f925bfccd4196d4982578b46413a1f73f/LMT-60-0.6B.Q8_0.gguf",

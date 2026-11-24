@@ -875,11 +875,17 @@ struct TranslationSettingsView: View {
             }
             section(t("文本翻译", "Text translation")) {
                 Picker(t("文本翻译模型", "Text translation model"), selection: settings.translationBinding(\.useLmtTranslation)) {
-                    Text("Hy-MT2 1.8B").tag(false)
+                    Text("Hy-MT3 1.8B").tag(false)
                     Text("LMT-60 0.6B").tag(true)
                 }
                 .frame(width: 290)
-                file("Hy-MT2 · 1.13 GB", path: Binding(
+                Picker(t("实时译文刷新间隔", "Live translation interval"), selection: settings.translationBinding(\.previewIntervalMs)) {
+                    ForEach(TranslationOptions.previewIntervalsMs, id: \.self) { interval in
+                        Text("\((Double(interval) / 1000).formatted()) \(t("秒", "s"))").tag(interval)
+                    }
+                }
+                .frame(width: 290)
+                file("Hy-MT3 · 1.35 GB", path: Binding(
                     get: { settings.translationOptions.standardTranslationPath },
                     set: { path in
                         var options = settings.translationOptions

@@ -7,6 +7,12 @@ public sealed class TranslationOptions
     public string TranslationModel { get; set; } = "";
     public string LmtTranslationModel { get; set; } = "";
     public bool UseLmtTranslation { get; set; }
+    private int previewIntervalMs = DefaultPreviewIntervalMs;
+    public int PreviewIntervalMs
+    {
+        get => previewIntervalMs;
+        set => previewIntervalMs = PreviewIntervalsMs.Contains(value) ? value : DefaultPreviewIntervalMs;
+    }
     public string CorrectionModel { get; set; } = "";
     public bool EnableCorrection { get; set; } = true;
     public bool DiagnosticsEnabled { get; set; }
@@ -29,6 +35,8 @@ public sealed class TranslationOptions
     public int TargetFontSize { get; set; } = 19;
 
     internal static readonly int[] FontSizes = [11, 13, 15, 17, 19, 22, 26, 32];
+    private const int DefaultPreviewIntervalMs = 1500;
+    internal static readonly int[] PreviewIntervalsMs = Enumerable.Range(1, 20).Select(step => step * 500).ToArray();
     internal int SelectedSourceFontSize => FontSizes.Contains(SourceFontSize) ? SourceFontSize : 13;
     internal int SelectedTargetFontSize => FontSizes.Contains(TargetFontSize) ? TargetFontSize : 19;
 
@@ -38,7 +46,6 @@ public sealed class TranslationOptions
         ("Korean", "韩语"), ("French", "法语"), ("German", "德语"), ("Spanish", "西班牙语")
     ];
 
-    internal const string LlamaModelUrl = "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf";
     internal const string LlamaRelease = "https://github.com/ggml-org/llama.cpp/releases";
 
     internal string[] AvailableSourceLanguages => StreamingSpeechModel.Catalog

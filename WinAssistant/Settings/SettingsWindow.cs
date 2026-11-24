@@ -1114,14 +1114,17 @@ internal sealed class SettingsWindow : Window
 
         BeginSection(T("文本翻译", "Text translation"));
         AddChoice(T("文本翻译模型", "Text translation model"),
-            [("standard", "Hy-MT2 1.8B"), ("lmt", "LMT-60 0.6B")],
+            [("standard", "Hy-MT3 1.8B"), ("lmt", "LMT-60 0.6B")],
             options.UseLmtTranslation ? "lmt" : "standard",
             value =>
             {
                 Save(item => item.UseLmtTranslation = value == "lmt");
                 Render();
             });
-        AddFile("Hy-MT2 · 1.13 GB", options.StandardTranslationPath, "GGUF (*.gguf)|*.gguf",
+        AddChoice(T("实时译文刷新间隔", "Live translation interval"),
+            TranslationOptions.PreviewIntervalsMs.Select(interval => (interval.ToString(), $"{interval / 1000.0:0.#} {T("秒", "s")}")).ToArray(),
+            options.PreviewIntervalMs.ToString(), value => Save(item => item.PreviewIntervalMs = int.Parse(value)));
+        AddFile("Hy-MT3 · 1.35 GB", options.StandardTranslationPath, "GGUF (*.gguf)|*.gguf",
             TranslationModelDownload.Llama.Url, value => Save(item =>
             {
                 item.TranslationModel = value;

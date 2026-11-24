@@ -118,7 +118,9 @@ internal static class StreamingRecognition
         var stableSentences = new string?[2];
         var pendingFinals = new Queue<TranslationCaption>();
         var pendingCorrections = new Dictionary<int, TranslationCaption>();
-        var lastRequest = new long[2];
+        int previewInterval = options.PreviewIntervalMs;
+        long firstEligible = Environment.TickCount64 - previewInterval;
+        long[] lastRequest = [firstEligible, firstEligible];
         var captures = new List<Task>();
         int captureStarted = 0;
         CancellationTokenSource? draftRequest = null;
@@ -419,7 +421,7 @@ internal static class StreamingRecognition
                             bool newSentence = stableSentences[index] is { } sentence &&
                                 (submitted[index]?.Id != draft.Id ||
                                  submitted[index]?.Source.StartsWith(sentence, StringComparison.Ordinal) != true);
-                            int remaining = newSentence ? 0 : (int)Math.Max(0, lastRequest[index] + 1000 - now);
+                            int remaining = newSentence ? 0 : (int)Math.Max(0, lastRequest[index] + previewInterval - now);
                             if (remaining == 0 && (chosen == -1 || lastRequest[index] < lastRequest[chosen])) chosen = index;
                             delay = Math.Min(delay, remaining);
                         }

@@ -8,6 +8,7 @@ struct TranslationOptions: Codable, Equatable {
     var translationModel = ""
     var lmtTranslationModel = ""
     var useLmtTranslation = false
+    var previewIntervalMs = Self.defaultPreviewIntervalMs
     var correctionModel = ""
     var enableCorrection = true
     var diagnosticsEnabled = false
@@ -29,7 +30,7 @@ struct TranslationOptions: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case streamingModel, additionalStreamingModels, translationModel, onlineSpeakerModel, llamaServer, compute, sourceLanguage, targetLanguage
-        case lmtTranslationModel, useLmtTranslation, correctionModel, enableCorrection, diagnosticsEnabled
+        case lmtTranslationModel, useLmtTranslation, previewIntervalMs, correctionModel, enableCorrection, diagnosticsEnabled
         case microphone, microphoneFilter, microphonePause, systemAudio, recordAudio, showSource, sourceFontSize, targetFontSize
     }
 
@@ -42,6 +43,9 @@ struct TranslationOptions: Codable, Equatable {
         translationModel = try fields.decodeIfPresent(String.self, forKey: .translationModel) ?? translationModel
         lmtTranslationModel = try fields.decodeIfPresent(String.self, forKey: .lmtTranslationModel) ?? lmtTranslationModel
         useLmtTranslation = try fields.decodeIfPresent(Bool.self, forKey: .useLmtTranslation) ?? useLmtTranslation
+        if let interval = try? fields.decode(Int.self, forKey: .previewIntervalMs), Self.previewIntervalsMs.contains(interval) {
+            previewIntervalMs = interval
+        }
         correctionModel = try fields.decodeIfPresent(String.self, forKey: .correctionModel) ?? correctionModel
         enableCorrection = try fields.decodeIfPresent(Bool.self, forKey: .enableCorrection) ?? enableCorrection
         diagnosticsEnabled = try fields.decodeIfPresent(Bool.self, forKey: .diagnosticsEnabled) ?? diagnosticsEnabled
@@ -64,6 +68,8 @@ struct TranslationOptions: Codable, Equatable {
     }
 
     static let fontSizes = [11, 13, 15, 17, 19, 22, 26, 32]
+    static let defaultPreviewIntervalMs = 1500
+    static let previewIntervalsMs = Array(stride(from: 500, through: 10_000, by: 500))
 
     static let languages = [
         (id: "Chinese", chinese: "中文"),
@@ -126,7 +132,6 @@ struct TranslationOptions: Codable, Equatable {
         return available.contains(fallback) ? fallback : (available.first ?? "")
     }
 
-    static let llamaModelURL = URL(string: "https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF/resolve/main/Hy-MT2-1.8B-Q4_K_M.gguf")!
     static let llamaRelease = URL(string: "https://github.com/ggml-org/llama.cpp/releases")!
 }
 
@@ -166,8 +171,18 @@ struct TranslationModelDownload: Sendable {
     let name: String
     let size: UInt64
     let sha256: String
+    private let preferredURL: URL?
+
+    init(url: URL, name: String, size: UInt64, sha256: String, preferredURL: URL? = nil) {
+        self.url = url
+        self.name = name
+        self.size = size
+        self.sha256 = sha256
+        self.preferredURL = preferredURL
+    }
 
     private var mirrorURL: URL {
+        if let preferredURL { return preferredURL }
         if url.host == "huggingface.co" {
             var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
             components.host = "hf-mirror.com"
@@ -176,8 +191,11 @@ struct TranslationModelDownload: Sendable {
         return URL(string: "https://ghproxy.net/\(url.absoluteString)")!
     }
 
-    static let llama = Self(url: TranslationOptions.llamaModelURL, name: "Hy-MT2-1.8B-Q4_K_M.gguf",
-        size: 1_133_080_448, sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699")
+    static let llama = Self(
+        url: URL(string: "https://huggingface.co/tencent/Hy-MT3-1.8B-GGUF/resolve/4c4370b31f13ccac4ac71133e3a0967c88cc792c/Hy-MT3-1.8B-Q4_K_M.gguf")!,
+        name: "Hy-MT3-1.8B-Q4_K_M.gguf", size: 1_348_432_160,
+        sha256: "bae6e591103654ff43ef0de7d1492f6e6df1f955505f6bb2cc52e86fc399a942",
+        preferredURL: URL(string: "https://modelscope.cn/models/Tencent-Hunyuan/Hy-MT3-1.8B-GGUF/resolve/d90a5d2b61c8598c9cc313464bd74930f526fb2b/Hy-MT3-1.8B-Q4_K_M.gguf")!)
 
     static let lmt = Self(
         url: URL(string: "https://huggingface.co/mradermacher/LMT-60-0.6B-GGUF/resolve/86942b9f925bfccd4196d4982578b46413a1f73f/LMT-60-0.6B.Q8_0.gguf")!,
@@ -524,7 +542,7 @@ final class TranslationEngine {
                 inputLanguage = detected.rawValue
                 target = detected.target
             }
-            var instruction = "Translate the following text into \(target).\n\n\(source)"
+            var instruction = "Translate the following text into \(target). Output only the translation, without explanations.\n\n\(source)"
             if options.useLmtTranslation {
                 if inputLanguage == "auto" {
                     inputLanguage = source.unicodeScalars.contains { (0x3400...0x9FFF).contains($0.value) } ? "Chinese" : "English"

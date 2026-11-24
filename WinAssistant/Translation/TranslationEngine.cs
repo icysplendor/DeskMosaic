@@ -178,7 +178,7 @@ internal sealed class TranslationEngine
                 if (detected is null) return new TranslationResult(provisional ? "" : source);
                 (inputLanguage, target) = detected.Value;
             }
-            string instruction = $"Translate the following text into {target}.\n\n{source}";
+            string instruction = $"Translate the following text into {target}. Output only the translation, without explanations.\n\n{source}";
             if (options.UseLmtTranslation)
             {
                 if (inputLanguage == "auto")

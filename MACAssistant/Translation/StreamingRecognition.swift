@@ -302,7 +302,8 @@ final class StreamingRecognition {
             var updated = updates.makeAsyncIterator()
             var submitted = [TranslationCaption?](repeating: nil, count: 2)
             var completed = [TranslationCaption?](repeating: nil, count: 2)
-            var lastRequest = [Double](repeating: -1, count: 2)
+            var lastRequest = [Double](repeating: -.infinity, count: 2)
+            let previewInterval = Double(options.previewIntervalMs) / 1000
             while !Task.isCancelled {
                 if !pendingFinals.isEmpty {
                     var final = pendingFinals.removeFirst()
@@ -326,7 +327,7 @@ final class StreamingRecognition {
                     let newSentence = stableSentences[index].map { sentence in
                         submitted[index]?.id != draft.id || submitted[index]?.source.hasPrefix(sentence) != true
                     } ?? false
-                    let deadline = lastRequest[index] + 1
+                    let deadline = lastRequest[index] + previewInterval
                     if newSentence || now >= deadline {
                         if chosen.map({ lastRequest[index] < lastRequest[$0] }) ?? true { chosen = index }
                     } else {
