@@ -312,7 +312,10 @@ int main(int argc, char **argv) {
         audio->signal_start = packet_start;
       audio->last_signal = audio->received;
     }
-    if (online_speakers) diar_enqueue(&diar, source, rate, count, samples, has_signal);
+    if (online_speakers) {
+      diar_enqueue(&diar, source, rate, count, samples, has_signal);
+      if (file_transcription) diar_wait_for_packet(&diar);
+    }
     DiarizedCaption *diarized = &diarized_captions[source];
     if (online_speakers && !drafts[source] && *diarized->text &&
         ((!has_signal && !audio->active && audio->received - audio->last_signal >= ParagraphSilence) ||
@@ -320,8 +323,10 @@ int main(int argc, char **argv) {
       DiarTimeline timeline = diar_snapshot(&diar, source);
       CaptionRange isolated_audio = audio->received - audio->last_signal >= 0.6
         ? (CaptionRange){fmax(0, audio->signal_start - 0.16), audio->last_signal + 0.20} : (CaptionRange){0};
-      publish_diarized_caption(diarized, source, NULL, 1, 0, &timeline, 1, &correction, isolated_audio, audio->last_signal);
-      fflush(stdout);
+      if (!file_transcription || timeline.covered >= diarized->last_word_time) {
+        publish_diarized_caption(diarized, source, NULL, 1, 0, &timeline, 1, &correction, isolated_audio, audio->last_signal);
+        fflush(stdout);
+      }
     }
     if (!audio->active) {
       if (!has_signal && remember_quiet(audio, samples, count, rate)) continue;
@@ -341,7 +346,8 @@ int main(int argc, char **argv) {
     if (online_speakers) timeline = diar_snapshot(&diar, source);
     double pause = use_microphone_vad ? microphone_pause : 1.6;
     int silence_endpoint = (file_transcription || online_speakers || use_microphone_vad) && audio->quiet >= pause &&
-      (!online_speakers || timeline.covered >= audio->received - audio->quiet + 0.32 || audio->quiet >= 3.0);
+      (file_transcription || !online_speakers ||
+       timeline.covered >= audio->received - audio->quiet + 0.32 || audio->quiet >= 3.0);
     if (silence_endpoint) {
       // Give the last chunk its right context before finalizing the stream.
       for (uint32_t padding = rate / 2; padding;) {
@@ -432,6 +438,7 @@ int main(int argc, char **argv) {
   }
   if (online_speakers) {
     diar_join(&diar);
+    if (file_transcription && diar.failed && !status) status = 4;
     for (int i = 0; i < AudioSources; ++i) {
       DiarTimeline timeline = diar_snapshot(&diar, (uint32_t)i);
       publish_diarized_caption(&diarized_captions[i], (uint32_t)i, drafts[i], 1, activity[i].stream_origin, &timeline, 1, &correction, (CaptionRange){0}, activity[i].last_signal);

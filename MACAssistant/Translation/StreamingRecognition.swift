@@ -26,11 +26,10 @@ final class StreamingRecognition {
 
     typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> String
 
-    func runFile(model: StreamingSpeechModel, archive: String, file: URL, ready: () -> Void,
+    func runFile(options: TranslationOptions, model: StreamingSpeechModel, archive: String, file: URL, ready: () -> Void,
                  caption: (TranslationCaption) -> Void, diagnostic: TranslationDiagnosticLog?) async throws {
-        let preparation = Task.detached { try Self.prepareModel(model, archive: archive, diagnostic: diagnostic) }
-        let directory = try await withTaskCancellationHandler(operation: { try await preparation.value },
-                                                              onCancel: { preparation.cancel() })
+        let (directory, arguments) = try await prepareRecognition(options: options, model: model, archive: archive,
+                                                                  diagnostic: diagnostic)
         try Task.checkCancellation()
         let contents = Bundle.main.bundleURL.appendingPathComponent("Contents")
         let pipe = Pipe()
@@ -42,7 +41,7 @@ final class StreamingRecognition {
         let helper = Process()
         helper.executableURL = contents.appendingPathComponent("Helpers/streaming-asr")
         helper.currentDirectoryURL = directory
-        helper.arguments = ["1", contents.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
+        helper.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
         environment["ASSISTANT_FILE_TRANSCRIPTION"] = "1"
         environment["ASSISTANT_MIC_VAD"] = "off"
@@ -123,11 +122,12 @@ final class StreamingRecognition {
             try Task.checkCancellation()
             let fields = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false)
             guard fields.count == 6, fields[0] == "0", fields[1] == "1",
-                  let start = Int64(fields[3]), let end = Int64(fields[4]),
+                  let speakerID = Int(fields[2]), let start = Int64(fields[3]), let end = Int64(fields[4]),
                   fields[5].contains(where: { $0.isLetter || $0.isNumber }) else { continue }
             paragraphCount += 1
             let item = TranslationCaption(id: paragraphCount, microphone: false,
-                source: String(fields[5]), translation: nil, translationFinal: false, startMs: start, endMs: end)
+                source: String(fields[5]), translation: nil, translationFinal: false,
+                speakerID: speakerID, startMs: start, endMs: end)
             caption(item)
         }
         try Task.checkCancellation()
@@ -191,30 +191,12 @@ final class StreamingRecognition {
         diagnostic?.write("audio_capture_ready")
         capturing()
 
-        let speaker = options.selectedSpeakerModel
-        let speakerFile = "speaker.gguf"
-        let preparation = Task.detached {
-            let directory = try Self.prepareModel(model, archive: archive, diagnostic: diagnostic)
-            if !speaker.isEmpty {
-                diagnostic?.write("speaker_cache_preparing")
-                try Self.prepareSpeaker(speaker, destination: directory.appendingPathComponent(speakerFile))
-                diagnostic?.write("speaker_cache_ready")
-            }
-            return directory
-        }
-        let model = try await withTaskCancellationHandler(operation: { try await preparation.value },
-                                                          onCancel: { preparation.cancel() })
-        try Task.checkCancellation()
+        let (model, arguments) = try await prepareRecognition(options: options, model: model, archive: archive,
+                                                              diagnostic: diagnostic)
         let helper = Process()
         helper.executableURL = helperURL
         helper.currentDirectoryURL = model
-        helper.arguments = ["1",
-                            folder.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
-        if !speaker.isEmpty {
-            helper.arguments?.append(speakerFile)
-            helper.arguments?.append(folder.appendingPathComponent("Frameworks/Diarization/libnemo_speech_asr_c.dylib").path)
-            helper.arguments?.append(options.compute == "cpu" ? "cpu" : "auto")
-        }
+        helper.arguments = arguments
         let correction = StreamingSpeechModel.correction
         let correctionArchive = options.selectedCorrectionModel
         let correctParagraphs = options.enableCorrection && !correctionArchive.isEmpty &&
@@ -527,6 +509,31 @@ final class StreamingRecognition {
         // Avoid locking at a decimal point, ellipsis, or short abbreviation.
         guard last == ".", text.count >= 4 else { return false }
         return text.dropLast().suffix(3).allSatisfy { $0.isASCII && $0.isLetter && $0.isLowercase }
+    }
+
+    private func prepareRecognition(options: TranslationOptions, model: StreamingSpeechModel, archive: String,
+                                    diagnostic: TranslationDiagnosticLog?) async throws -> (URL, [String]) {
+        let speaker = options.selectedSpeakerModel
+        let speakerFile = "speaker.gguf"
+        let preparation = Task.detached {
+            let directory = try Self.prepareModel(model, archive: archive, diagnostic: diagnostic)
+            if !speaker.isEmpty {
+                diagnostic?.write("speaker_cache_preparing")
+                try Self.prepareSpeaker(speaker, destination: directory.appendingPathComponent(speakerFile))
+                diagnostic?.write("speaker_cache_ready")
+            }
+            return directory
+        }
+        let directory = try await withTaskCancellationHandler(operation: { try await preparation.value },
+                                                          onCancel: { preparation.cancel() })
+        try Task.checkCancellation()
+        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
+        var arguments = ["1", folder.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
+        if !speaker.isEmpty {
+            arguments += [speakerFile, folder.appendingPathComponent("Frameworks/Diarization/libnemo_speech_asr_c.dylib").path,
+                          options.compute == "cpu" ? "cpu" : "auto"]
+        }
+        return (directory, arguments)
     }
 
     private nonisolated static func prepareSpeaker(_ source: String, destination: URL) throws {

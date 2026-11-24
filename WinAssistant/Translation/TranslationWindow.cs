@@ -18,6 +18,7 @@ internal sealed class TranslationWindow : Window
     private string? audioFile;
     private bool changingSource;
     private bool fileSession;
+    private bool fileCompleted;
     private readonly Button fileNotice = new() { Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly StackPanel captions = new();
     private readonly ScrollViewer history;
@@ -207,7 +208,7 @@ internal sealed class TranslationWindow : Window
         languages.Children.Add(transcribeOnly);
         recordAudio.Foreground = Foreground;
         recordAudio.Content = T("录音", "Record");
-        recordAudio.ToolTip = T("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads");
+        ToolTipService.SetShowOnDisabled(recordAudio, true);
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
         languages.Children.Add(recordAudio);
@@ -290,7 +291,7 @@ internal sealed class TranslationWindow : Window
         };
         PreviewDrop += (_, args) =>
         {
-            if (session is null && DropFile(args.Data) is { } file) SetAudioFile(file);
+            if (session is null && DropFile(args.Data) is { } file) SetAudioFile(file, reselected: true);
             args.Handled = true;
         };
         Content = root;
@@ -318,17 +319,23 @@ internal sealed class TranslationWindow : Window
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
         recordAudio.IsEnabled = session is null && audioFile is null;
+        recordAudio.IsChecked = audioFile is null && ConfigurationStore.Shared.Configuration.Translation.RecordAudio;
+        recordAudio.ToolTip = audioFile is null
+            ? T("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads")
+            : T("导入音频时无法录音", "Recording is unavailable for imported audio");
         fileNotice.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
         var options = SessionOptions();
         bool twoWayReady = options.CanTranslateTwoWay;
-        twoWay.Visibility = session is null ? Visibility.Visible : Visibility.Collapsed;
+        twoWay.Visibility = session is null && !fileCompleted ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
         twoWay.ToolTip = !translating
             ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
                 : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
-        start.Content = session is null ? T("开始", "Start")
+        start.IsEnabled = !fileCompleted;
+        start.Content = fileCompleted ? T("音频执行完毕", "Audio processing complete")
+            : session is null ? T("开始", "Start")
             : twoWaySession ? T("互译结束", "End two-way translation") : T("翻译结束", "End translation");
         start.Background = start.BorderBrush = session is null ? Accent : Danger;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
@@ -352,7 +359,6 @@ internal sealed class TranslationWindow : Window
         translationSize.SelectedItem = options.SelectedTargetFontSize;
         if (session is null)
         {
-            recordAudio.IsChecked = options.RecordAudio;
             compute.SelectedValue = options.Compute is "auto" or "cpu" or "gpu" ? options.Compute : "auto";
             var index = (options.SystemAudio, options.Microphone) switch
             {
@@ -363,6 +369,7 @@ internal sealed class TranslationWindow : Window
             };
             audioSource.SelectedIndex = audioFile is null ? index : ImportSource;
         }
+        UpdateLanguageControls();
         UpdateOriginals(showSource.IsChecked == true);
         Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
@@ -384,13 +391,14 @@ internal sealed class TranslationWindow : Window
             Title = T("选择音频文件", "Choose an audio file"),
             Filter = T("音频文件", "Audio files") + "|" + string.Join(";", AudioExtensions.Select(ext => "*" + ext))
         };
-        if (dialog.ShowDialog(this) == true) SetAudioFile(dialog.FileName);
+        if (dialog.ShowDialog(this) == true) SetAudioFile(dialog.FileName, reselected: true);
         else SetAudioFile(audioFile);
     }
 
-    private void SetAudioFile(string? file, int? liveIndex = null)
+    private void SetAudioFile(string? file, int? liveIndex = null, bool reselected = false)
     {
-        bool changed = audioFile != file;
+        bool changed = audioFile != file || reselected;
+        if (changed) fileCompleted = false;
         audioFile = file;
         var options = SessionOptions();
         changingSource = true;
@@ -449,7 +457,7 @@ internal sealed class TranslationWindow : Window
     private void Toggle(bool twoWayMode)
     {
         if (session is not null) { Stop(); return; }
-        sessionCompletion = RunSessionAsync(twoWayMode);
+        if (!fileCompleted) sessionCompletion = RunSessionAsync(twoWayMode);
     }
 
     private async Task RunSessionAsync(bool twoWayMode)
@@ -467,7 +475,7 @@ internal sealed class TranslationWindow : Window
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = !fileSession && options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;
@@ -476,6 +484,7 @@ internal sealed class TranslationWindow : Window
         SetStatus(T("正在加载模型…", "Loading models…"));
         string result = T("已停止", "Stopped");
         bool failed = false;
+        bool completed = false;
         string? savedRecording = null;
         Action<string>? onSaved = record ? path => savedRecording = path : null;
         try
@@ -499,7 +508,7 @@ internal sealed class TranslationWindow : Window
                 else
                     SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
             }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved, file));
-            if (fileSession && !current.IsCancellationRequested) result = T("音频处理完成", "Audio processing complete");
+            completed = fileSession;
         }
         catch (Exception error) when (current.IsCancellationRequested && error is not TranslationRecordingException) { }
         catch (Exception error)
@@ -515,6 +524,8 @@ internal sealed class TranslationWindow : Window
                     ApplyCaption(item with { SourceFinal = true });
             foreach (var item in transcript.Where(item => item.Translation is null).ToArray())
                 ApplyCaption(item with { Translation = "" });
+            fileCompleted = completed && !current.IsCancellationRequested;
+            if (fileCompleted) result = T("音频处理完成", "Audio processing complete");
             if (savedRecording is not null && !failed) result = T("录音已保存", "Recording saved");
             SetStatus(result, failed: failed, details: savedRecording);
             session = null;

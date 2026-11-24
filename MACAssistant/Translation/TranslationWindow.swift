@@ -10,6 +10,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     private static let audioExtensions = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aif", "aiff", "webm"]
     @Published private(set) var audioFile: URL?
     @Published private(set) var fileSession = false
+    @Published private(set) var fileCompleted = false
     @Published private(set) var captions: [TranslationCaption] = []
     @Published private(set) var running = false
     @Published private(set) var listening = false
@@ -99,13 +100,14 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     func importAudio(_ file: URL) -> Bool {
         guard !running, file.isFileURL, Self.audioExtensions.contains(file.pathExtension.lowercased()),
               (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return false }
-        setAudioFile(file)
+        setAudioFile(file, reselected: true)
         return true
     }
 
-    func setAudioFile(_ file: URL?) {
-        guard file != audioFile else { return }
+    func setAudioFile(_ file: URL?, reselected: Bool = false) {
+        guard file != audioFile || reselected else { return }
         audioFile = file
+        fileCompleted = false
         let options = sessionOptions
         sourceLanguage = TranslationOptions.selectLanguage(sourceLanguage, from: options.sessionSourceLanguages)
         targetLanguage = TranslationOptions.selectLanguage(targetLanguage, from: options.targetLanguages(for: sourceLanguage), fallback: "English")
@@ -128,6 +130,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func toggle(twoWay: Bool = false) {
         guard job == nil else { stop(); return }
+        guard !fileCompleted else { return }
         let file = audioFile
         fileSession = file != nil
         var options = sessionOptions
@@ -138,7 +141,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        identifiesSpeakers = !fileSession && !options.selectedSpeakerModel.isEmpty
+        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true
@@ -196,7 +199,9 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                     if index == self.captions.count { self.captions.append(item) }
                     else if self.captions.indices.contains(index) { self.captions[index] = item }
                 }, recordingSaved: onSaved, audioFile: file)
-                status = file == nil ? t("已停止", "Stopped") : t("音频处理完成", "Audio processing complete")
+                try Task.checkCancellation()
+                fileCompleted = file != nil
+                status = fileCompleted ? t("音频处理完成", "Audio processing complete") : t("已停止", "Stopped")
             } catch {
                 if Task.isCancelled && !(error is TranslationRecordingError) { status = t("已停止", "Stopped") }
                 else {
@@ -334,6 +339,7 @@ private struct TranslationWindowView: View {
     private let accent = Color(red: 0.14, green: 0.42, blue: 0.996)
     private let stopAccent = Color(red: 0.70, green: 0.24, blue: 0.30)
     private var sessionButtonTitle: String {
+        if controller.fileCompleted { return t("音频执行完毕", "Audio processing complete") }
         guard controller.running else { return t("开始", "Start") }
         return controller.twoWaySession ? t("互译结束", "End two-way translation") : t("翻译结束", "End translation")
     }
@@ -347,25 +353,16 @@ private struct TranslationWindowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Picker(t("音源", "Audio source"), selection: audioSource) {
-                    if audioSource.wrappedValue == .none {
-                        Text(t("请选择", "Select")).tag(AudioSource.none)
-                    }
-                    Text(t("电脑声音", "System audio")).tag(AudioSource.system)
-                    Text(t("麦克风", "Microphone")).tag(AudioSource.microphone)
-                    Text(t("电脑声＋麦克风", "System + mic")).tag(AudioSource.both)
-                    Text(t("导入音频", "Import audio")).tag(AudioSource.file)
-                }
-                .labelsHidden()
-                .fixedSize()
+                dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
+                    (.system, t("电脑声音", "System audio")),
+                    (.microphone, t("麦克风", "Microphone")),
+                    (.both, t("电脑声＋麦克风", "System + mic")),
+                    (.file, t("导入音频", "Import audio"))
+                ], placeholder: t("请选择", "Select"))
                 .disabled(controller.running)
-                Picker(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute)) {
-                    Text(t("自动", "Automatic")).tag("auto")
-                    Text("CPU").tag("cpu")
-                    Text(t("优先 GPU", "Prefer GPU")).tag("gpu")
-                }
-                .labelsHidden()
-                .fixedSize()
+                dropdown(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute), choices: [
+                    ("auto", t("自动", "Automatic")), ("cpu", "CPU"), ("gpu", t("优先 GPU", "Prefer GPU"))
+                ], placeholder: t("自动", "Automatic"))
                 .disabled(controller.running)
                 fontSizePicker(t("原文", "Source"), settings.translationBinding(\.sourceFontSize))
                     .help(t("原文字号", "Source size"))
@@ -455,24 +452,18 @@ private struct TranslationWindowView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Picker(t("源语言", "Source language"), selection: $controller.sourceLanguage) {
-                    translationLanguageChoices(controller.sessionOptions.sessionSourceLanguages, english: settings.language == "en-US")
-                }
-                .labelsHidden()
-                .frame(width: 110)
-                .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
+                languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
+                                 available: controller.sessionOptions.sessionSourceLanguages)
+                    .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
                 Button { controller.swapLanguages() } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
                 .accessibilityLabel(t("交换语言", "Swap languages"))
                 .help(t("交换语言", "Swap languages"))
                 .disabled(!controller.canSwapLanguages)
-                Picker(t("目标语言", "Target language"), selection: $controller.targetLanguage) {
-                    translationLanguageChoices(controller.sessionOptions.targetLanguages(for: controller.sourceLanguage), english: settings.language == "en-US")
-                }
-                .labelsHidden()
-                .frame(width: 110)
-                .disabled(controller.transcribeOnly || controller.sessionOptions.availableTargetLanguages.isEmpty)
+                languageDropdown(t("目标语言", "Target language"), selection: $controller.targetLanguage,
+                                 available: controller.sessionOptions.targetLanguages(for: controller.sourceLanguage))
+                    .disabled(controller.transcribeOnly || controller.sessionOptions.availableTargetLanguages.isEmpty)
             }
             .disabled(controller.running)
             Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
@@ -481,15 +472,18 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running)
-            Toggle(t("录音", "Record"), isOn: settings.translationBinding(\.recordAudio))
-                .help(t("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads"))
+            Toggle(t("录音", "Record"), isOn: controller.audioFile == nil ? settings.translationBinding(\.recordAudio) : .constant(false))
+                .help(controller.audioFile == nil
+                      ? t("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads")
+                      : t("导入音频时无法录音", "Recording is unavailable for imported audio"))
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running || controller.audioFile != nil)
             sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
+                .disabled(controller.fileCompleted)
                 .padding(.leading, 4)
-            if !controller.running {
+            if !controller.running && !controller.fileCompleted {
                 sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
                     controller.toggle(twoWay: true)
                 }
@@ -589,13 +583,59 @@ private struct TranslationWindowView: View {
         .disabled(!controller.hasFinalCaptions)
     }
 
-    private func fontSizePicker(_ title: String, _ selection: Binding<Int>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(TranslationOptions.fontSizes, id: \.self) { size in
-                Text(String(size)).tag(size)
+    private func dropdown<Value: Hashable>(_ title: String, selection: Binding<Value>,
+                                           choices: [(Value, String)], placeholder: String = "",
+                                           width: CGFloat? = nil) -> some View {
+        let current = choices.first { $0.0 == selection.wrappedValue }?.1 ?? placeholder
+        return Menu {
+            ForEach(choices.map { $0.0 }, id: \.self) { value in
+                if let label = choices.first(where: { $0.0 == value })?.1 {
+                    Button { selection.wrappedValue = value } label: {
+                        if value == selection.wrappedValue {
+                            Label(label, systemImage: "checkmark")
+                        } else {
+                            Text(label)
+                        }
+                    }
+                }
             }
+        } label: {
+            HStack(spacing: 6) {
+                Text(current).lineLimit(1).frame(maxWidth: width == nil ? nil : .infinity, alignment: .leading)
+                Path { path in
+                    path.move(to: CGPoint(x: 1, y: 1))
+                    path.addLine(to: CGPoint(x: 5, y: 5))
+                    path.addLine(to: CGPoint(x: 9, y: 1))
+                }
+                .stroke(dark ? Color(red: 0.67, green: 0.73, blue: 0.82) : Color(red: 0.32, green: 0.38, blue: 0.48),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .frame(width: 10, height: 6)
+                .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 8)
+            .frame(width: width, height: 22)
+            .background(dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : .white,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(line).allowsHitTesting(false))
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel(title)
+        .accessibilityValue(current)
+    }
+
+    private func languageDropdown(_ title: String, selection: Binding<String>, available: [String]) -> some View {
+        dropdown(title, selection: selection, choices: available.compactMap { id in
+            translationLanguageLabel(id, english: settings.language == "en-US").map { (id, $0) }
+        }, placeholder: t("未配置模型", "No model"), width: 110)
+    }
+
+    private func fontSizePicker(_ title: String, _ selection: Binding<Int>) -> some View {
+        HStack(spacing: 4) {
+            Text(title)
+            dropdown(title, selection: selection, choices: TranslationOptions.fontSizes.map { ($0, String($0)) })
+        }
     }
 
     private func captionReviewLabel(_ review: CaptionReview) -> String {
@@ -907,10 +947,14 @@ private func translationLanguageChoices(_ available: [String], english: Bool) ->
         Text(english ? "No model" : "未配置模型").tag("")
     }
     ForEach(available, id: \.self) { id in
-        if id == "auto" {
-            Text(english ? "Auto-detect" : "自动识别").tag(id)
-        } else if let language = TranslationOptions.languages.first(where: { $0.id == id }) {
-            Text(english ? language.id : language.chinese).tag(id)
+        if let label = translationLanguageLabel(id, english: english) {
+            Text(label).tag(id)
         }
     }
+}
+
+private func translationLanguageLabel(_ id: String, english: Bool) -> String? {
+    if id == "auto" { return english ? "Auto-detect" : "自动识别" }
+    guard let language = TranslationOptions.languages.first(where: { $0.id == id }) else { return nil }
+    return english ? language.id : language.chinese
 }

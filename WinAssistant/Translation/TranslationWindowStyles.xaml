@@ -66,10 +66,12 @@
                             </ToggleButton.Template>
                         </ToggleButton>
                         <Border x:Name="Chrome" IsHitTestVisible="False" Background="{DynamicResource CaptionSurface}"
-                                BorderBrush="{DynamicResource CaptionLine}" BorderThickness="1" CornerRadius="8" Padding="9,0">
+                                BorderBrush="{DynamicResource CaptionLine}" BorderThickness="1" CornerRadius="6" Padding="8,0">
                             <DockPanel>
-                                <TextBlock DockPanel.Dock="Right" Text="⌄" Margin="6,0,0,0"
-                                           Foreground="{DynamicResource CaptionMuted}" VerticalAlignment="Center" />
+                                <Path DockPanel.Dock="Right" Data="M 1,1 L 5,5 L 9,1" Width="10" Height="6"
+                                      Margin="6,0,0,0" VerticalAlignment="Center"
+                                      Stroke="{DynamicResource CaptionMuted}" StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
                                 <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
                                     ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" VerticalAlignment="Center" />
                             </DockPanel>

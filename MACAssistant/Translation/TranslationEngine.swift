@@ -435,7 +435,7 @@ final class TranslationEngine {
                             translate: StreamingRecognition.Translate?) async throws {
             if let audioFile {
                 guard let translationReady, let translate else {
-                    try await recognition.runFile(model: model, archive: options.path(for: model), file: audioFile,
+                    try await recognition.runFile(options: options, model: model, archive: options.path(for: model), file: audioFile,
                                                   ready: { status(nil) }, caption: caption, diagnostic: diagnostic)
                     return
                 }
@@ -443,7 +443,7 @@ final class TranslationEngine {
                 captureStarted()
                 let transcription = Task {
                     do {
-                        try await recognition.runFile(model: model, archive: options.path(for: model),
+                        try await recognition.runFile(options: options, model: model, archive: options.path(for: model),
                             file: audioFile, ready: { status(nil) }, caption: { paragraph in
                                 caption(paragraph)
                                 output.yield(paragraph)

@@ -91,7 +91,7 @@ typedef struct {
   size_t queued;
   double queued_seconds;
   double quiet[DiarSources], skipped[DiarSources];
-  int stopping, failed;
+  int processing, stopping, failed;
 } Diarizer;
 
 static int diar_library(Diarizer *diar, const char *path, int prefer_gpu) {
@@ -208,6 +208,7 @@ static DIAR_WORKER diar_work(void *context) {
       diar_unlock(&diar->lock);
       break;
     }
+    diar->processing = 1;
     diar->head = packet->next;
     if (!diar->head) diar->tail = NULL;
     --diar->queued;
@@ -235,16 +236,19 @@ static DIAR_WORKER diar_work(void *context) {
     int success = (!packet->count || !diar->push(input->stream, packet->samples, packet->count, packet->rate)) &&
                   diar_read_frames(diar, packet->source);
     free(packet);
-    if (!success) {
-      diar_lock(&diar->lock);
-      diar->failed = 1;
-      diar_signal(&diar->event);
-      diar_unlock(&diar->lock);
-    }
+    diar_lock(&diar->lock);
+    diar->processing = 0;
+    if (!success) diar->failed = 1;
+    diar_signal(&diar->event);
+    diar_unlock(&diar->lock);
   }
   for (int source = 0; source < DiarSources; ++source) {
     DiarInput *input = &diar->inputs[source];
-    if (input->consumed && !diar->finish(input->stream)) diar_read_frames(diar, source);
+    if (input->fed > 0 && (diar->finish(input->stream) || !diar_read_frames(diar, source))) {
+      diar_lock(&diar->lock);
+      diar->failed = 1;
+      diar_unlock(&diar->lock);
+    }
   }
   return 0;
 }
@@ -311,6 +315,15 @@ static void diar_enqueue(Diarizer *diar, uint32_t source, uint32_t rate, uint32_
     diar->queued_seconds += duration;
   }
   diar_signal(&diar->event);
+  diar_unlock(&diar->lock);
+}
+
+// File decoding can run faster than real time. Finish processing the supplied
+// packet before ASR uses the speaker timeline to finalize a paragraph.
+static void diar_wait_for_packet(Diarizer *diar) {
+  diar_lock(&diar->lock);
+  while (!diar->failed && (diar->queued || diar->processing))
+    diar_wait(&diar->event, &diar->lock);
   diar_unlock(&diar->lock);
 }
 

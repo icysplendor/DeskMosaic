@@ -9,14 +9,15 @@ namespace WinAssistant.Translation;
 
 internal static class StreamingRecognition
 {
-    internal static async Task RunFileAsync(StreamingSpeechModel speechModel, string archive,
+    internal static async Task RunFileAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive,
         string audioFile, Action ready, Action<TranslationCaption> caption, CancellationToken token)
     {
         const int rate = 16_000;
         string executable = BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe");
         string model = await PrepareModel(speechModel, archive, token, _ => { });
+        var helperArguments = await RecognitionArguments(options, model, token);
         string encoder = WinAssistant.Screenshot.RegionRecording.FindEncoder();
-        using var helper = Start(executable, model, true, ["1", "-"], environment: new()
+        using var helper = Start(executable, model, true, helperArguments, environment: new()
         {
             ["ASSISTANT_FILE_TRANSCRIPTION"] = "1",
             ["ASSISTANT_MIC_VAD"] = "off"
@@ -86,10 +87,11 @@ internal static class StreamingRecognition
                 {
                     var fields = line.Split('\t', 6);
                     if (fields.Length != 6 || fields[0] != "0" || fields[1] != "1" ||
+                        !int.TryParse(fields[2], out int speakerId) ||
                         !long.TryParse(fields[3], out long start) || !long.TryParse(fields[4], out long end) ||
                         !fields[5].Any(char.IsLetterOrDigit)) continue;
                     var paragraph = new TranslationCaption(++paragraphCount, false, fields[5], null,
-                        TranslationFinal: false, StartMs: start, EndMs: end);
+                        TranslationFinal: false, SpeakerId: speakerId, StartMs: start, EndMs: end);
                     caption(paragraph);
                 }
                 await helper.WaitForExitAsync(token);
@@ -155,14 +157,7 @@ internal static class StreamingRecognition
         {
             string executable = await runtime.WaitAsync(active);
             var model = await PrepareModel(speechModel, archive, active, Log);
-            string speaker = options.SelectedSpeakerModel;
-            string[] arguments = ["1", "-"];
-            if (speaker.Length != 0)
-            {
-                const string speakerFile = "speaker.gguf";
-                await PrepareSpeaker(speaker, Path.Combine(model, speakerFile), active);
-                arguments = [.. arguments, speakerFile, "-", options.Compute == "cpu" ? "cpu" : "auto"];
-            }
+            string[] arguments = await RecognitionArguments(options, model, active);
             string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
             if (correctionDirectory is not null)
                 arguments = [.. arguments, "--correction", correctionDirectory];
@@ -614,6 +609,16 @@ internal static class StreamingRecognition
         finally { Directory.Delete(temporary, recursive: true); }
         log($"model={model.Id} installed");
         return installed;
+    }
+
+    private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token)
+    {
+        string speaker = options.SelectedSpeakerModel;
+        if (speaker.Length == 0) return ["1", "-"];
+
+        const string speakerFile = "speaker.gguf";
+        await PrepareSpeaker(speaker, Path.Combine(model, speakerFile), token);
+        return ["1", "-", speakerFile, "-", options.Compute == "cpu" ? "cpu" : "auto"];
     }
 
     private static async Task PrepareSpeaker(string source, string destination, CancellationToken token)

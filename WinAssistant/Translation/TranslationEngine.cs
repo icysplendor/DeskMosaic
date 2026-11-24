@@ -44,7 +44,7 @@ internal sealed class TranslationEngine
         {
             if (audioFile is not null)
             {
-                await StreamingRecognition.RunFileAsync(model, options.PathFor(model), audioFile, () => status(null), caption, token);
+                await StreamingRecognition.RunFileAsync(options, model, options.PathFor(model), audioFile, () => status(null), caption, token);
                 return;
             }
             await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
@@ -94,7 +94,7 @@ internal sealed class TranslationEngine
                 {
                     try
                     {
-                        await StreamingRecognition.RunFileAsync(model, options.PathFor(model), audioFile, () => status(null),
+                        await StreamingRecognition.RunFileAsync(options, model, options.PathFor(model), audioFile, () => status(null),
                             paragraph =>
                             {
                                 caption(paragraph);
