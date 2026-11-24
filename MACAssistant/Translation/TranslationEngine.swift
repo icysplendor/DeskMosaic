@@ -167,6 +167,15 @@ struct TranslationModelDownload: Sendable {
     let size: UInt64
     let sha256: String
 
+    private var mirrorURL: URL {
+        if url.host == "huggingface.co" {
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+            components.host = "hf-mirror.com"
+            return components.url!
+        }
+        return URL(string: "https://ghproxy.net/\(url.absoluteString)")!
+    }
+
     static let llama = Self(url: TranslationOptions.llamaModelURL, name: "Hy-MT2-1.8B-Q4_K_M.gguf",
         size: 1_133_080_448, sha256: "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699")
 
@@ -207,20 +216,20 @@ struct TranslationModelDownload: Sendable {
         if try isVerified(destination) { return destination.path }
 
         let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 3600
         let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
-        let (temporary, response) = try await session.download(from: url)
-        defer { try? files.removeItem(at: temporary) }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            throw TranslationError("模型下载失败（HTTP \(status)）。", "Model download failed (HTTP \(status)).")
-        }
         let staging = directory.appendingPathComponent(".\(UUID().uuidString).part")
-        try files.moveItem(at: temporary, to: staging)
         defer { try? files.removeItem(at: staging) }
-        guard try isVerified(staging) else {
-            throw TranslationError("下载文件的 SHA-256 校验失败。", "The downloaded model failed SHA-256 verification.")
+        do {
+            try await download(from: mirrorURL)
+        } catch let error as URLError where error.code != .cancelled {
+            try Task.checkCancellation()
+            try await download(from: url)
+        } catch is TranslationError {
+            try Task.checkCancellation()
+            try await download(from: url)
         }
         if files.fileExists(atPath: destination.path) {
             _ = try files.replaceItemAt(destination, withItemAt: staging)
@@ -228,6 +237,20 @@ struct TranslationModelDownload: Sendable {
             try files.moveItem(at: staging, to: destination)
         }
         return destination.path
+
+        func download(from source: URL) async throws {
+            let (temporary, response) = try await session.download(from: source)
+            defer { try? files.removeItem(at: temporary) }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200 else {
+                throw TranslationError("模型下载失败（HTTP \(status)）。", "Model download failed (HTTP \(status)).")
+            }
+            try files.moveItem(at: temporary, to: staging)
+            guard try isVerified(staging) else {
+                try files.removeItem(at: staging)
+                throw TranslationError("下载文件的大小或 SHA-256 校验失败。", "The downloaded model failed size or SHA-256 verification.")
+            }
+        }
     }
 
     func isVerified(_ path: URL) throws -> Bool {

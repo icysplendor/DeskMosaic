@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 
@@ -5,6 +6,17 @@ namespace WinAssistant.Translation;
 
 internal sealed record TranslationModelDownload(string Url, string FileName, long Size, string Sha256)
 {
+    private Uri MirrorUrl
+    {
+        get
+        {
+            var source = new Uri(Url);
+            return source.Host == "huggingface.co"
+                ? new UriBuilder(source) { Host = "hf-mirror.com" }.Uri
+                : new Uri($"https://ghproxy.net/{Url}");
+        }
+    }
+
     internal static readonly TranslationModelDownload Llama = new(TranslationOptions.LlamaModelUrl,
         "Hy-MT2-1.8B-Q4_K_M.gguf", 1_133_080_448, "dc5f44fcf1fa496ee7ad725982c0c8c553a4de00259b53af84c4b89fb0c06699");
 
@@ -30,7 +42,8 @@ internal sealed record TranslationModelDownload(string Url, string FileName, lon
     internal bool HasExpectedSize(string? path) =>
         !string.IsNullOrEmpty(path) && Path.IsPathFullyQualified(path) && File.Exists(path) && new FileInfo(path).Length == Size;
 
-    private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromHours(1) };
+    private static readonly HttpClient Client = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(60);
 
     internal async Task<string> DownloadAsync(IProgress<int> progress)
     {
@@ -42,19 +55,47 @@ internal sealed record TranslationModelDownload(string Url, string FileName, lon
         var temporary = $"{path}.{Guid.NewGuid():N}.part";
         try
         {
+            try
+            {
+                await DownloadFromAsync(MirrorUrl).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is HttpRequestException or HttpIOException or OperationCanceledException or InvalidDataException)
+            {
+                File.Delete(temporary);
+                progress.Report(0);
+                await DownloadFromAsync(new Uri(Url)).ConfigureAwait(false);
+            }
+            File.Move(temporary, path, overwrite: true);
+            return path;
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+
+        async Task DownloadFromAsync(Uri source)
+        {
             using var deadline = new CancellationTokenSource(TimeSpan.FromHours(1));
-            var token = deadline.Token;
-            using var response = await Client.GetAsync(Url, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            var token = idle.Token;
+            idle.CancelAfter(NetworkTimeout);
+            using var response = await Client.GetAsync(source, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+                throw new HttpRequestException($"Model download failed (HTTP {(int)response.StatusCode}).",
+                    inner: null, response.StatusCode);
             await using var input = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+            idle.CancelAfter(Timeout.InfiniteTimeSpan);
             await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, true))
             {
                 var buffer = new byte[128 * 1024];
                 long total = 0;
-                int shown = -1;
-                int count;
-                while ((count = await input.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+                int shown = 0;
+                while (true)
                 {
+                    idle.CancelAfter(NetworkTimeout);
+                    int count = await input.ReadAsync(buffer, token).ConfigureAwait(false);
+                    idle.CancelAfter(Timeout.InfiniteTimeSpan);
+                    if (count == 0) break;
                     total += count;
                     if (total > Size) throw new InvalidDataException("Unexpected model size.");
                     await output.WriteAsync(buffer.AsMemory(0, count), token).ConfigureAwait(false);
@@ -62,14 +103,8 @@ internal sealed record TranslationModelDownload(string Url, string FileName, lon
                     if (percent != shown) progress.Report(shown = percent);
                 }
             }
-            if (!await IsVerifiedAsync(temporary).ConfigureAwait(false))
-                throw new InvalidDataException("Model download did not match the published SHA-256.");
-            File.Move(temporary, path, overwrite: true);
-            return path;
-        }
-        finally
-        {
-            File.Delete(temporary);
+            if (!await IsVerifiedAsync(temporary, deadline.Token).ConfigureAwait(false))
+                throw new InvalidDataException("Model download did not match the published size or SHA-256.");
         }
     }
 
