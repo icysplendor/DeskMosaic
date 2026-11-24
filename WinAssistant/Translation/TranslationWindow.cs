@@ -902,7 +902,7 @@ internal sealed class TranslationWindow : Window
             }
             heading += " · " + item.TimeRange;
 
-            var section = new StringBuilder($"## {MarkdownText(heading)}");
+            var section = new StringBuilder($"**{MarkdownText(heading)}**");
             if (source.Length > 0)
             {
                 if (includeTranslation) section.Append($"\n\n**{T("原文", "Source")}**");

@@ -253,7 +253,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             }
             heading += " · " + item.timeRange
 
-            var section = ["## \(markdownText(heading))"]
+            var section = ["**\(markdownText(heading))**"]
             if !source.isEmpty {
                 if includeTranslation { section.append("**\(t("原文", "Source"))**") }
                 section.append(markdownText(source))
