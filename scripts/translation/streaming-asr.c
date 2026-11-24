@@ -1,6 +1,7 @@
 /* The app sends mono float32 PCM as {source, sample rate, sample count} followed by samples.
  * Output lines are source, event, speaker ID, start/end milliseconds, and UTF-8 text, separated by tabs.
- * 0 = draft, 1 = final, F<id> = final with a pending revision, R<id> = revision
+ * 0[<bytes>] = draft with optional stable sentence prefix in UTF-8 bytes,
+ * 1 = final, F<id> = final with a pending revision, R<id> = revision
  * (empty text retains the original).
  * Pipes keep audio and recognition local to the parent process.
  */
@@ -400,7 +401,8 @@ int main(int argc, char **argv) {
                 ? (CaptionRange){audio->stream_origin, audio->last_signal + 0.20} : (CaptionRange){0};
               finalize_caption(&correction, source, 0, text, start, length, words, word_count, fallback, isolated_audio);
             } else if (!file_transcription) {
-              emit_caption(source, '0', 0, 0, caption_range(words, word_count, start, length, fallback),
+              unsigned boundary = preview_sentence_boundary(text + start, stable > start ? stable - start : 0);
+              emit_caption(source, '0', boundary, 0, caption_range(words, word_count, start, length, fallback),
                            text + start, length - start);
             }
           }

@@ -54,6 +54,18 @@ static int paragraph_sentence_end(const char *text, size_t index, uint32_t code)
   return 1;
 }
 
+// Byte length of the latest sentence boundary confirmed by the stable prefix.
+static unsigned preview_sentence_boundary(const char *text, size_t stable) {
+  unsigned boundary = 0;
+  for (size_t index = 0; index < stable;) {
+    size_t width;
+    uint32_t code = paragraph_char(text + index, stable - index, &width);
+    if (paragraph_sentence_end(text, index, code)) boundary = (unsigned)(index + width);
+    index += width;
+  }
+  return boundary;
+}
+
 static size_t paragraph_boundary(const char *text, size_t stable) {
   // East Asian characters use two reading units. Preserve the streaming tail
   // until a new boundary arrives after the corresponding length threshold.

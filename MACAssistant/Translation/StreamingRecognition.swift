@@ -24,7 +24,7 @@ final class StreamingRecognition {
         return try await current?.finish()
     }
 
-    typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> String
+    typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> TranslationResult
 
     func runFile(options: TranslationOptions, model: StreamingSpeechModel, archive: String, file: URL, ready: () -> Void,
                  caption: (TranslationCaption) -> Void, diagnostic: TranslationDiagnosticLog?) async throws {
@@ -284,10 +284,11 @@ final class StreamingRecognition {
 
         let (updates, signal) = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         var drafts = [TranslationCaption?](repeating: nil, count: 2)
+        var stableSentences = [String?](repeating: nil, count: 2)
         var pendingFinals: [TranslationCaption] = []
         var pendingCorrections: [Int: TranslationCaption] = [:]
         var nextID = 0
-        var draftRequest: Task<String, Error>?
+        var draftRequest: Task<TranslationResult, Error>?
         var draftInput: (id: Int, source: String)?
         var draftHasOutput = false
 
@@ -308,28 +309,43 @@ final class StreamingRecognition {
                     let translation = try await translateSafely(final.source, provisional: false) { _ in }
                     try Task.checkCancellation()
                     // On failure the visible preview stays provisional.
-                    if !translation.isEmpty || (final.translation ?? "").isEmpty {
-                        final.translation = translation
+                    if !translation.text.isEmpty || (final.translation ?? "").isEmpty {
+                        final.translation = translation.text
+                        final.cacheHitPercent = translation.cacheHitPercent
                         final.translationFinal = true
                         caption(final)
                     }
                     continue
                 }
                 let now = ProcessInfo.processInfo.systemUptime
-                let changed = drafts.indices.filter { index in
-                    guard let draft = drafts[index] else { return false }
-                    return submitted[index]?.id != draft.id || submitted[index]?.source != draft.source
+                var nextDeadline: Double?
+                var chosen: Int?
+                for index in drafts.indices {
+                    guard let draft = drafts[index], submitted[index]?.id != draft.id ||
+                        submitted[index]?.source != draft.source else { continue }
+                    let newSentence = stableSentences[index].map { sentence in
+                        submitted[index]?.id != draft.id || submitted[index]?.source.hasPrefix(sentence) != true
+                    } ?? false
+                    let deadline = lastRequest[index] + 1
+                    if newSentence || now >= deadline {
+                        if chosen.map({ lastRequest[index] < lastRequest[$0] }) ?? true { chosen = index }
+                    } else {
+                        nextDeadline = min(nextDeadline ?? deadline, deadline)
+                    }
                 }
-                guard let index = changed.min(by: { lastRequest[$0] < lastRequest[$1] }) else {
+                guard let index = chosen, let request = drafts[index] else {
+                    // A new sentence or a pending final can wake us before the deadline.
+                    let wake = nextDeadline.map { deadline in
+                        Task {
+                            let delay = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+                            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                            if !Task.isCancelled { signal.yield(()) }
+                        }
+                    }
                     _ = await updated.next()
+                    wake?.cancel()
                     continue
                 }
-                let delay = lastRequest[index] + 0.25 - now
-                if delay > 0 {
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                    continue
-                }
-                guard let request = drafts[index] else { continue }
                 var anchor = completed[index]
                 var source = request.source
                 if let saved = anchor, saved.id == request.id, source.hasPrefix(saved.source) {
@@ -351,15 +367,17 @@ final class StreamingRecognition {
                     try await translateSafely(source, provisional: true) { preview($0, complete: false) }
                 }
                 draftRequest = job
-                let result = (try? await job.value) ?? ""
+                let result = try? await job.value
                 draftRequest = nil
                 draftInput = nil
                 try Task.checkCancellation()
                 submitted[index] = request
-                preview(result, complete: true)
+                if let result { preview(result.text, complete: true, cacheHitPercent: result.cacheHitPercent) }
 
-                @MainActor func preview(_ text: String, complete: Bool) {
+                @MainActor func preview(_ text: String, complete: Bool, cacheHitPercent: Int? = nil) {
                     guard !Task.isCancelled, var latest = drafts[index], latest.id == request.id, !text.isEmpty else { return }
+                    draftHasOutput = true
+                    if !complete { cancelStaleDraft(latest) }
                     guard Self.stillRepresentsSource(request.source, latest.source) else { return }
                     var previewText = text
                     if let prefix = anchor?.translation, let last = prefix.last {
@@ -367,18 +385,19 @@ final class StreamingRecognition {
                     }
                     let visible = latest.translation ?? ""
                     // Publish a rephrased open sentence once, after its preview finishes.
-                    if previewText != visible, complete || previewText.hasPrefix(visible) {
+                    if complete || (previewText != visible && previewText.hasPrefix(visible)) {
                         latest.translation = previewText
-                        drafts[index] = latest
-                        caption(latest)
+                        latest.cacheHitPercent = cacheHitPercent
+                        if latest != drafts[index] {
+                            drafts[index] = latest
+                            caption(latest)
+                        }
                     }
                     if complete, Self.endsSentence(request.source), Self.endsSentence(previewText) {
                         var saved = request
                         saved.translation = previewText
                         completed[index] = saved
                     }
-                    draftHasOutput = true
-                    if !complete { cancelStaleDraft(latest) }
                 }
             }
         }
@@ -405,7 +424,8 @@ final class StreamingRecognition {
             guard fields.count == 6, let index = Int(fields[0]), drafts.indices.contains(index),
                   let speakerID = Int(fields[2]), let startMs = Int64(fields[3]), let endMs = Int64(fields[4]),
                   startMs >= 0, endMs >= startMs else { continue }
-            let source = fields[5].trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawSource = fields[5]
+            let source = rawSource.trimmingCharacters(in: .whitespacesAndNewlines)
             let kind = fields[1]
             let correctionID = kind.first.map { "FRE".contains($0) } == true ? Int(kind.dropFirst()) : nil
             if let correctionID, kind.first != "F" {
@@ -441,14 +461,22 @@ final class StreamingRecognition {
             }
             let final = review != nil
             let previous = drafts[index]
-            guard source.contains(where: { $0.isLetter || $0.isNumber }),
-                  final || source != previous?.source || speakerID != previous?.speakerID ||
+            guard source.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            let oldStableSentence = stableSentences[index]
+            stableSentences[index] = nil
+            if !final, kind.first == "0", let bytes = Int(kind.dropFirst()), bytes > 0, bytes <= rawSource.utf8.count {
+                stableSentences[index] = String(bytes: rawSource.utf8.prefix(bytes), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard final || stableSentences[index] != oldStableSentence ||
+                    source != previous?.source || speakerID != previous?.speakerID ||
                     startMs != previous?.startMs || endMs != previous?.endMs else { continue }
             if previous == nil { nextID += 1 }
             // A shorter final source still uses the visible preview until its replacement arrives.
             let item = TranslationCaption(id: previous?.id ?? nextID, microphone: index == 1, source: source,
                                           translation: previous?.translation, sourceFinal: final, translationFinal: false, speakerID: speakerID,
-                                          startMs: startMs, endMs: endMs, review: review)
+                                          startMs: startMs, endMs: endMs, review: review,
+                                          cacheHitPercent: previous?.cacheHitPercent)
             drafts[index] = final ? nil : item
             if let review { diagnostic?.write("paragraph id=\(item.id) range_ms=\(startMs)-\(endMs) review=\(review)") }
             caption(item)
@@ -479,18 +507,15 @@ final class StreamingRecognition {
 
         func cancelStaleDraft(_ current: TranslationCaption) {
             guard draftHasOutput, let input = draftInput, current.id == input.id else { return }
-            let minimumGrowth = input.source.contains { $0.isLetter && !$0.isASCII } ? 4 : 12
-            if !Self.endsSentence(input.source), current.source.count - input.source.count >= minimumGrowth {
-                draftRequest?.cancel()
-            }
+            if !Self.stillRepresentsSource(input.source, current.source) { draftRequest?.cancel() }
         }
 
-        func translateSafely(_ source: String, provisional: Bool, preview: @escaping @MainActor (String) -> Void) async throws -> String {
-            guard let translate else { return "" }
+        func translateSafely(_ source: String, provisional: Bool, preview: @escaping @MainActor (String) -> Void) async throws -> TranslationResult {
+            guard let translate else { return TranslationResult(text: "") }
             do { return try await translate(source, provisional, preview) }
             catch {
                 try Task.checkCancellation()
-                return ""
+                return TranslationResult(text: "")
             }
         }
     }

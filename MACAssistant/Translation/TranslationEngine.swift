@@ -335,6 +335,7 @@ struct TranslationCaption: Identifiable, Equatable {
     var startMs: Int64 = 0
     var endMs: Int64 = 0
     var review: CaptionReview?
+    var cacheHitPercent: Int?
 
     var timeRange: String { "\(Self.formatTime(startMs)) – \(Self.formatTime(endMs))" }
 
@@ -345,6 +346,11 @@ struct TranslationCaption: Identifiable, Equatable {
         let clock = String(format: "%02lld:%02lld.%lld", minutes, seconds % 60, fraction)
         return seconds >= 3600 ? String(format: "%02lld:", seconds / 3600) + clock : clock
     }
+}
+
+struct TranslationResult {
+    let text: String
+    var cacheHitPercent: Int? = nil
 }
 
 @MainActor
@@ -458,8 +464,10 @@ final class TranslationEngine {
                             try await translationReady()
                             ready = true
                         }
-                        paragraph.translation = try await translate(paragraph.source, false) { _ in }
+                        let result = try await translate(paragraph.source, false) { _ in }
                         try Task.checkCancellation()
+                        paragraph.translation = result.text
+                        paragraph.cacheHitPercent = result.cacheHitPercent
                         paragraph.translationFinal = true
                         caption(paragraph)
                     }
@@ -483,12 +491,12 @@ final class TranslationEngine {
             if let sessionError { throw sessionError }
         }
 
-        func translateText(_ source: String, _ provisional: Bool, _ preview: @MainActor (String) -> Void) async throws -> String {
+        func translateText(_ source: String, _ provisional: Bool, _ preview: @MainActor (String) -> Void) async throws -> TranslationResult {
             var inputLanguage = sourceLanguage
             var target = selectedTarget
             if options.twoWay {
                 guard let detected = ChineseEnglishSource.detect(source) else {
-                    return provisional ? "" : source
+                    return TranslationResult(text: provisional ? "" : source)
                 }
                 inputLanguage = detected.rawValue
                 target = detected.target
@@ -500,7 +508,9 @@ final class TranslationEngine {
                 }
                 if inputLanguage == target {
                     // In Chinese output mode, let LMT translate English mixed into Mandarin.
-                    guard target == "Chinese", source.contains(where: { $0.isASCII && $0.isLetter }) else { return source }
+                    guard target == "Chinese", source.contains(where: { $0.isASCII && $0.isLetter }) else {
+                        return TranslationResult(text: source)
+                    }
                     inputLanguage = "English"
                 }
                 instruction = "Translate the following text from \(inputLanguage) into \(target):\n\(inputLanguage): \(source)\n\(target):"
@@ -519,6 +529,18 @@ final class TranslationEngine {
             ]
             if options.useLmtTranslation { body["chat_template_kwargs"] = ["enable_thinking": false] }
             prompt.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let started = ProcessInfo.processInfo.systemUptime
+            var timings: CompletionUpdate.Timings?
+            var completed = false
+            defer {
+                if let diagnostic {
+                    let kind = provisional ? "preview" : "final"
+                    let outcome = completed ? "completed" : Task.isCancelled ? "cancelled" : "failed"
+                    let elapsed = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+                    let metrics = timings?.diagnosticFields ?? "timings=unavailable"
+                    diagnostic.write("translation_request kind=\(kind) outcome=\(outcome) backend=\(llama.backend) elapsed_ms=\(elapsed) \(metrics)")
+                }
+            }
             let (bytes, response) = try await http.bytes(for: prompt)
             guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
                 throw TranslationError("翻译请求失败。", "Translation request failed.")
@@ -527,10 +549,15 @@ final class TranslationEngine {
             var last = 0.0
             for try await line in bytes.lines {
                 try Task.checkCancellation()
-                if line == "data: [DONE]" { return result.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if line == "data: [DONE]" {
+                    completed = true
+                    return TranslationResult(text: result.trimmingCharacters(in: .whitespacesAndNewlines),
+                                             cacheHitPercent: timings?.cacheHitPercent)
+                }
                 guard line.hasPrefix("data: ") else { continue }
                 let update = try JSONDecoder().decode(CompletionUpdate.self, from: Data(line.dropFirst(6).utf8))
-                guard let text = update.choices.first?.delta?.content, !text.isEmpty else { continue }
+                timings = update.timings ?? timings
+                guard let text = update.choices?.first?.delta?.content, !text.isEmpty else { continue }
                 result += text
                 let now = ProcessInfo.processInfo.systemUptime
                 if now - last >= 0.12 {
@@ -653,7 +680,36 @@ final class TranslationEngine {
             struct Delta: Decodable { let content: String? }
             let delta: Delta?
         }
-        let choices: [Choice]
+        struct Timings: Decodable {
+            let cache_n: Int?
+            let prompt_n: Int?
+            let prompt_ms: Double?
+            let predicted_n: Int?
+            let predicted_ms: Double?
+
+            var cacheHitPercent: Int? {
+                guard let cache_n, let prompt_n, cache_n >= 0, prompt_n >= 0 else { return nil }
+                let total = Double(cache_n) + Double(prompt_n)
+                return total > 0 ? Int((100 * Double(cache_n) / total).rounded()) : nil
+            }
+
+            var diagnosticFields: String {
+                "cache_n=\(cache_n.map { String($0) } ?? "na") prompt_n=\(prompt_n.map { String($0) } ?? "na") " +
+                "cache_hit_percent=\(cacheHitPercent.map { String($0) } ?? "na") prompt_ms=\(prompt_ms.map { String($0) } ?? "na") " +
+                "predicted_n=\(predicted_n.map { String($0) } ?? "na") predicted_ms=\(predicted_ms.map { String($0) } ?? "na")"
+            }
+        }
+
+        let choices: [Choice]?
+        let timings: Timings?
+
+        init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            choices = try fields.decodeIfPresent([Choice].self, forKey: .choices)
+            timings = try? fields.decode(Timings.self, forKey: .timings)
+        }
+
+        private enum CodingKeys: String, CodingKey { case choices, timings }
     }
 
 }

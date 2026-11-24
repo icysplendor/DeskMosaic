@@ -15,7 +15,7 @@ internal enum CaptionReview
     ModelPreparing, ModelFailed, NoReviewableText, AudioUnaligned, OutsideLimits, QueueFull, Unavailable
 }
 
-internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None)
+internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None, int? CacheHitPercent = null)
 {
     internal string TimeRange => $"{FormatTime(StartMs)} – {FormatTime(EndMs)}";
 
@@ -26,6 +26,8 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
         return time.TotalHours >= 1 ? $"{(long)time.TotalHours:00}:{clock}" : clock;
     }
 }
+
+internal sealed record TranslationResult(string Text, int? CacheHitPercent = null);
 
 internal sealed class TranslationEngine
 {
@@ -40,6 +42,8 @@ internal sealed class TranslationEngine
         string translationModel = options.TranscribeOnly ? "" : options.SelectedTranslationModel;
         if (!options.TranscribeOnly && translationModel.Length == 0)
             throw new InvalidOperationException("请在录写/翻译设置中下载或选择当前的文本翻译模型。 / Install the selected text translation model in Transcribe / Translate settings.");
+        using var diagnostic = options.DiagnosticsEnabled ? OpenDiagnosticLog() : null;
+        Log($"session_started fast_model={model.Id} source_language={options.SelectedSourceLanguage}");
         if (options.TranscribeOnly)
         {
             if (audioFile is not null)
@@ -48,7 +52,7 @@ internal sealed class TranslationEngine
                 return;
             }
             await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
-                null, caption, null, token, recordingSaved);
+                null, caption, null, token, recordingSaved, Log);
             return;
         }
 
@@ -78,9 +82,10 @@ internal sealed class TranslationEngine
                             server = await llamaStartup.WaitAsync(active);
                             status(server.Backend);
                         }
-                        string translation = await TranslateText(paragraph.Source, false, _ => { }, active);
+                        var result = await TranslateText(paragraph.Source, false, _ => { }, active);
                         active.ThrowIfCancellationRequested();
-                        caption(paragraph with { Translation = translation, TranslationFinal = true });
+                        caption(paragraph with { Translation = result.Text, TranslationFinal = true,
+                            CacheHitPercent = result.CacheHitPercent });
                     }
                 }
                 finally
@@ -114,13 +119,20 @@ internal sealed class TranslationEngine
                 {
                     var server = await llamaStartup.WaitAsync(active);
                     status(server.Backend);
-                }, caption, TranslateText, active, recordingSaved);
+                }, caption, TranslateText, active, recordingSaved, Log);
         }
         finally
         {
             session.Cancel();
             try { using var server = await llamaStartup; }
             catch (Exception) { /* The translation worker reports startup failures. */ }
+            if (audioFile is not null) Log("session_ended");
+        }
+
+        void Log(string message)
+        {
+            try { diagnostic?.WriteLine($"{DateTimeOffset.Now:O} {message}"); }
+            catch (IOException error) { Debug.WriteLine(error); }
         }
 
         async Task<LocalServer> StartTranslation()
@@ -156,14 +168,14 @@ internal sealed class TranslationEngine
             }
         }
 
-        async Task<string> TranslateText(string source, bool provisional, Action<string> preview, CancellationToken cancellation)
+        async Task<TranslationResult> TranslateText(string source, bool provisional, Action<string> preview, CancellationToken cancellation)
         {
             string inputLanguage = sourceLanguage;
             string target = selectedTarget;
             if (options.TwoWay)
             {
                 var detected = ChineseEnglishSource.Detect(source);
-                if (detected is null) return provisional ? "" : source;
+                if (detected is null) return new TranslationResult(provisional ? "" : source);
                 (inputLanguage, target) = detected.Value;
             }
             string instruction = $"Translate the following text into {target}.\n\n{source}";
@@ -174,7 +186,7 @@ internal sealed class TranslationEngine
                 if (inputLanguage == target)
                 {
                     // In Chinese output mode, let LMT translate English mixed into Mandarin.
-                    if (target != "Chinese" || !source.Any(char.IsAsciiLetter)) return source;
+                    if (target != "Chinese" || !source.Any(char.IsAsciiLetter)) return new TranslationResult(source);
                     inputLanguage = "English";
                 }
                 instruction = $"Translate the following text from {inputLanguage} into {target}:\n{inputLanguage}: {source}\n{target}:";
@@ -192,25 +204,89 @@ internal sealed class TranslationEngine
             };
             if (options.UseLmtTranslation) body["chat_template_kwargs"] = new { enable_thinking = false };
             request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-            using var translated = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
-            translated.EnsureSuccessStatusCode();
-            using var stream = new StreamReader(await translated.Content.ReadAsStreamAsync(cancellation));
-            var result = new StringBuilder();
-            long last = 0;
-            while (await stream.ReadLineAsync(cancellation) is { } line)
+            long started = Environment.TickCount64;
+            TranslationTimings? timings = null;
+            bool completed = false;
+            try
             {
-                if (line == "data: [DONE]") return result.ToString().Trim();
-                if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
-                using var update = JsonDocument.Parse(line[6..]);
-                if (!update.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0 ||
-                    !choices[0].TryGetProperty("delta", out var delta) || !delta.TryGetProperty("content", out var content)) continue;
-                result.Append(content.GetString());
-                long now = Environment.TickCount64;
-                if (result.Length == 0 || now - last < 120) continue;
-                preview(result.ToString().Trim());
-                last = now;
+                using var translated = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+                translated.EnsureSuccessStatusCode();
+                using var stream = new StreamReader(await translated.Content.ReadAsStreamAsync(cancellation));
+                var result = new StringBuilder();
+                long last = 0;
+                while (await stream.ReadLineAsync(cancellation) is { } line)
+                {
+                    if (line == "data: [DONE]")
+                    {
+                        completed = true;
+                        return new TranslationResult(result.ToString().Trim(), timings?.CacheHitPercent);
+                    }
+                    if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
+                    using var update = JsonDocument.Parse(line[6..]);
+                    var chunk = update.RootElement;
+                    if (chunk.TryGetProperty("timings", out var metrics) && metrics.ValueKind == JsonValueKind.Object)
+                        timings = TranslationTimings.Read(metrics);
+                    if (!chunk.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array ||
+                        choices.GetArrayLength() == 0 ||
+                        !choices[0].TryGetProperty("delta", out var delta) || !delta.TryGetProperty("content", out var content)) continue;
+                    result.Append(content.GetString());
+                    long now = Environment.TickCount64;
+                    if (result.Length == 0 || now - last < 120) continue;
+                    preview(result.ToString().Trim());
+                    last = now;
+                }
+                throw new IOException("Translation stream ended early.");
             }
-            throw new IOException("Translation stream ended early.");
+            finally
+            {
+                if (diagnostic is not null)
+                {
+                    string kind = provisional ? "preview" : "final";
+                    string outcome = completed ? "completed" : cancellation.IsCancellationRequested ? "cancelled" : "failed";
+                    Log($"translation_request kind={kind} outcome={outcome} backend={llama.Backend} " +
+                        $"elapsed_ms={Environment.TickCount64 - started} {timings?.DiagnosticFields ?? "timings=unavailable"}");
+                }
+            }
+        }
+    }
+
+    private sealed record TranslationTimings(int? Cached, int? Prompt, double? PromptMs, int? Predicted, double? PredictedMs)
+    {
+        internal int? CacheHitPercent => Cached is >= 0 && Prompt is >= 0 && Cached.Value + (double)Prompt.Value > 0
+            ? (int)Math.Round(100.0 * Cached.Value / (Cached.Value + (double)Prompt.Value), MidpointRounding.AwayFromZero)
+            : null;
+
+        internal string DiagnosticFields =>
+            $"cache_n={Field(Cached)} prompt_n={Field(Prompt)} cache_hit_percent={Field(CacheHitPercent)} " +
+            $"prompt_ms={Field(PromptMs)} predicted_n={Field(Predicted)} predicted_ms={Field(PredictedMs)}";
+
+        internal static TranslationTimings Read(JsonElement metrics) =>
+            new(Count(metrics, "cache_n"), Count(metrics, "prompt_n"), Milliseconds(metrics, "prompt_ms"),
+                Count(metrics, "predicted_n"), Milliseconds(metrics, "predicted_ms"));
+
+        private static string Field(IFormattable? value) =>
+            value?.ToString(null, System.Globalization.CultureInfo.InvariantCulture) ?? "na";
+
+        private static int? Count(JsonElement metrics, string key) =>
+            metrics.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out int value) ? value : null;
+
+        private static double? Milliseconds(JsonElement metrics, string key) =>
+            metrics.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetDouble(out double value) ? value : null;
+    }
+
+    private static TextWriter? OpenDiagnosticLog()
+    {
+        try
+        {
+            var directory = TranslationRecording.DownloadsDirectory();
+            Directory.CreateDirectory(directory);
+            var name = $"Translation-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log";
+            return TextWriter.Synchronized(new StreamWriter(Path.Combine(directory, name)) { AutoFlush = true });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
+        {
+            Debug.WriteLine(error);
+            return null;
         }
     }
 

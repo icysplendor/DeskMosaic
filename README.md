@@ -49,7 +49,9 @@ macOS 还可以切换显示器分辨率和刷新率，单独设置外接鼠标�
 
 ## 反馈与开发
 
-录写或翻译启动失败时，可以开启「设置 → 录写／翻译 → 诊断日志（保存到下载）」，复现后提供最新的 `Translation-diagnostics-*.log`。日志会记录模型和引擎状态，不含录音或字幕正文。反馈问题时请附系统版本、软件版本和复现步骤。 [提交问题](https://github.com/icysplendor/DeskMosaic/issues)
+实时翻译对每路音源的未完句每秒最多请求一次预览，期间合并原文更新。识别确认新的句末时可提前翻译，定稿优先。译文生成完成后，字幕行在复核状态右侧显示本次翻译的输入缓存命中率（引擎提供数据时）。
+
+可在「设置 → 录写／翻译」开启「诊断日志（保存到下载）」，查看模型和引擎状态，以及每次翻译的缓存命中率、输入处理耗时和译文生成耗时。日志文件为 `Translation-diagnostics-*.log`，不含录音或字幕正文。反馈问题时请附系统版本、软件版本和复现步骤。 [提交问题](https://github.com/icysplendor/DeskMosaic/issues)
 
 - **macOS** 用 Xcode 打开 `MACAssistant.xcodeproj`，运行 `MACAssistant` scheme。Apple Silicon 上可用 [构建脚本](scripts/build-release.sh) 生成包含运行库的 DMG。
 - **Windows** 用 .NET 8 SDK 构建 `WinAssistant/WinAssistant.csproj`。完整打包步骤可参考 [GitHub Actions 工作流](.github/workflows/build.yml)。

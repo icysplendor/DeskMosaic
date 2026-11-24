@@ -45,7 +45,7 @@ internal sealed class TranslationWindow : Window
     private readonly ComboBox translationSize = new() { Width = 53 };
     private readonly Button export = new() { IsEnabled = false };
     private readonly List<TranslationCaption> transcript = new();
-    private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review)> visibleRows = new();
+    private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review, TextBlock Cache)> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
     private CancellationTokenSource? session;
     private Task? sessionCompletion;
@@ -580,12 +580,20 @@ internal sealed class TranslationWindow : Window
             {
                 FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0)
             };
+            var cache = new TextBlock
+            {
+                FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(9, 0, 0, 0),
+                ToolTip = T("本次翻译复用的输入 token 比例", "Share of prompt tokens reused for this translation")
+            };
+            Typography.SetNumeralAlignment(cache, FontNumeralAlignment.Tabular);
             var attribution = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
             attribution.Children.Add(origin);
             attribution.Children.Add(speaker);
             attribution.Children.Add(editing);
             attribution.Children.Add(time);
             attribution.Children.Add(review);
+            attribution.Children.Add(cache);
             var card = new StackPanel();
             card.Children.Add(original);
             card.Children.Add(translation);
@@ -603,7 +611,7 @@ internal sealed class TranslationWindow : Window
                 BorderThickness = new Thickness(3, 0, 0, 0), CornerRadius = new CornerRadius(6)
             };
             captions.Children.Add(latest);
-            visibleRows.Add(item.Id, (original, translation, speaker, time, review));
+            visibleRows.Add(item.Id, (original, translation, speaker, time, review, cache));
             if (captions.Children.Count > 250)
             {
                 captions.Children.RemoveAt(0);
@@ -649,6 +657,8 @@ internal sealed class TranslationWindow : Window
                 CaptionReview.Unavailable => T("未复核 · 状态不可用", "Not reviewed · Status unavailable"),
                 _ => ""
             };
+            row.Cache.Visibility = item.CacheHitPercent.HasValue ? Visibility.Visible : Visibility.Collapsed;
+            row.Cache.Text = item.CacheHitPercent is int percent ? T($"缓存命中 {percent}%", $"Cache hit {percent}%") : "";
             row.Original.Text = item.Source;
             row.Original.Foreground = string.IsNullOrEmpty(item.Translation) ? Foreground : Muted;
             row.Translation.Visibility = sourceOnlySession ? Visibility.Collapsed : Visibility.Visible;

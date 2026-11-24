@@ -239,8 +239,11 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
     caption->word_count = kept;
   }
   caption->speaker = speaker;
-  if (start < total)
-    emit_caption(source, '0', 0, speaker, caption_range(words, count, start, total, fallback),
+  if (start < total) {
+    size_t stable_end = scored_limit < total ? scored_limit : total;
+    unsigned boundary = preview_sentence_boundary(joined + start, stable_end > start ? stable_end - start : 0);
+    emit_caption(source, '0', boundary, speaker, caption_range(words, count, start, total, fallback),
                  joined + start, total - start);
+  }
 }
 #endif
