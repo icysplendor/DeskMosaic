@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Channels;
 using System.Text.Json;
 
 namespace WinAssistant.Translation;
@@ -29,9 +30,10 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
 internal sealed class TranslationEngine
 {
     internal async Task RunAsync(TranslationOptions options, Action capturing, Action<string?> status,
-        Action<TranslationCaption> caption, CancellationToken token, Action<string>? recordingSaved = null)
+        Action<TranslationCaption> caption, CancellationToken token, Action<string>? recordingSaved = null, string? audioFile = null)
     {
-        if (!options.SystemAudio && !options.Microphone)
+        options.ImportedAudio = audioFile is not null;
+        if (audioFile is null && !options.SystemAudio && !options.Microphone)
             throw new InvalidOperationException("Select an audio source / 请选择音源。");
         var model = options.ModelForSource(options.SelectedSourceLanguage)
             ?? throw new InvalidOperationException("请在录写/翻译设置中下载或选择对应的流式语音模型。 / Install a streaming speech model in Transcribe / Translate settings.");
@@ -40,6 +42,11 @@ internal sealed class TranslationEngine
             throw new InvalidOperationException("请在录写/翻译设置中下载或选择当前的文本翻译模型。 / Install the selected text translation model in Transcribe / Translate settings.");
         if (options.TranscribeOnly)
         {
+            if (audioFile is not null)
+            {
+                await StreamingRecognition.RunFileAsync(model, options.PathFor(model), audioFile, () => status(null), caption, token);
+                return;
+            }
             await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
                 null, caption, null, token, recordingSaved);
             return;
@@ -55,6 +62,49 @@ internal sealed class TranslationEngine
         string sourceLanguage = options.SelectedSourceLanguage;
         try
         {
+            if (audioFile is not null)
+            {
+                var paragraphs = Channel.CreateUnbounded<TranslationCaption>(
+                    new UnboundedChannelOptions { SingleWriter = true, SingleReader = true });
+                captureReady.TrySetResult();
+                var recognition = RecognizeFile();
+                try
+                {
+                    LocalServer? server = null;
+                    await foreach (var paragraph in paragraphs.Reader.ReadAllAsync(active))
+                    {
+                        if (server is null)
+                        {
+                            server = await llamaStartup.WaitAsync(active);
+                            status(server.Backend);
+                        }
+                        string translation = await TranslateText(paragraph.Source, false, _ => { }, active);
+                        active.ThrowIfCancellationRequested();
+                        caption(paragraph with { Translation = translation, TranslationFinal = true });
+                    }
+                }
+                finally
+                {
+                    session.Cancel();
+                    await recognition;
+                }
+                return;
+
+                async Task RecognizeFile()
+                {
+                    try
+                    {
+                        await StreamingRecognition.RunFileAsync(model, options.PathFor(model), audioFile, () => status(null),
+                            paragraph =>
+                            {
+                                caption(paragraph);
+                                paragraphs.Writer.TryWrite(paragraph);
+                            }, active);
+                        paragraphs.Writer.TryComplete();
+                    }
+                    catch (Exception error) { paragraphs.Writer.TryComplete(error); }
+                }
+            }
             await StreamingRecognition.RunAsync(options, model, options.PathFor(model), () =>
                 {
                     capturing();

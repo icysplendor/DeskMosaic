@@ -7,6 +7,9 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     static let shared = TranslationWindowController()
 
     @Published private var speakerNames: [Int: String] = [:]
+    private static let audioExtensions = ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aif", "aiff", "webm"]
+    @Published private(set) var audioFile: URL?
+    @Published private(set) var fileSession = false
     @Published private(set) var captions: [TranslationCaption] = []
     @Published private(set) var running = false
     @Published private(set) var listening = false
@@ -28,6 +31,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func show() {
         if window?.isVisible != true && !running {
+            setAudioFile(nil)
             transcribeOnly = false
             let defaults = SettingsManager.shared.translationOptions
             sourceLanguage = defaults.selectedSourceLanguage
@@ -66,7 +70,10 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         return wasRecording && failed ? status : nil
     }
 
-    func windowWillClose(_ notification: Notification) { stop() }
+    func windowWillClose(_ notification: Notification) {
+        stop()
+        setAudioFile(nil)
+    }
 
     func openSettings() {
         window?.orderOut(nil)
@@ -74,9 +81,41 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         SettingsWindowController.shared.show(page: .translation)
     }
 
+    var sessionOptions: TranslationOptions {
+        var options = SettingsManager.shared.translationOptions
+        options.importedAudio = audioFile != nil
+        return options
+    }
+
+    func chooseAudioFile() {
+        guard !running else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = Self.audioExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let file = panel.url { _ = importAudio(file) }
+    }
+
+    func importAudio(_ file: URL) -> Bool {
+        guard !running, file.isFileURL, Self.audioExtensions.contains(file.pathExtension.lowercased()),
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return false }
+        setAudioFile(file)
+        return true
+    }
+
+    func setAudioFile(_ file: URL?) {
+        guard file != audioFile else { return }
+        audioFile = file
+        let options = sessionOptions
+        sourceLanguage = TranslationOptions.selectLanguage(sourceLanguage, from: options.sessionSourceLanguages)
+        targetLanguage = TranslationOptions.selectLanguage(targetLanguage, from: options.targetLanguages(for: sourceLanguage), fallback: "English")
+        status = file == nil ? t("就绪", "Ready") : t("已准备好处理音频", "Ready to process audio")
+        failed = false
+    }
+
     var canSwapLanguages: Bool {
-        let options = SettingsManager.shared.translationOptions
-        return !running && !transcribeOnly && options.availableSourceLanguages.contains(targetLanguage) &&
+        let options = sessionOptions
+        return !running && !transcribeOnly && options.sessionSourceLanguages.contains(targetLanguage) &&
             options.targetLanguages(for: targetLanguage).contains(sourceLanguage)
     }
 
@@ -89,15 +128,17 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func toggle(twoWay: Bool = false) {
         guard job == nil else { stop(); return }
-        var options = SettingsManager.shared.translationOptions
-        let record = options.recordAudio
+        let file = audioFile
+        fileSession = file != nil
+        var options = sessionOptions
+        let record = file == nil && options.recordAudio
         options.sourceLanguage = sourceLanguage
         options.targetLanguage = targetLanguage
         options.transcribeOnly = transcribeOnly
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
+        identifiesSpeakers = !fileSession && !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true
@@ -130,12 +171,18 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             let onSaved: ((URL) -> Void)? = record ? { self.savedRecording = $0 } : nil
             do {
                 try await engine.run(options: options, capturing: {
+                    guard file == nil else { return }
                     self.listening = true
                     self.status = record ? self.t("正在录音 · 加载模型…", "Recording · Loading models…") :
                         self.t("正在采集 · 加载模型…", "Capturing audio · Loading models…")
                 }, status: { backend in
                     self.listening = true
-                    self.speechReady = true
+                    self.speechReady = file == nil
+                    if file != nil {
+                        self.status = backend.map { self.t("正在处理音频 · 逐段翻译", "Processing audio · Translating") + " · " + $0 }
+                            ?? self.t("正在识别音频文件…", "Transcribing audio file…")
+                        return
+                    }
                     let label: String
                     if twoWay {
                         label = record ? self.t("互译并录音", "Two-way + recording") : self.t("正在互译", "Translating both ways")
@@ -148,8 +195,8 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                     let index = item.id - self.clearedThroughCaption - 1
                     if index == self.captions.count { self.captions.append(item) }
                     else if self.captions.indices.contains(index) { self.captions[index] = item }
-                }, recordingSaved: onSaved)
-                status = t("已停止", "Stopped")
+                }, recordingSaved: onSaved, audioFile: file)
+                status = file == nil ? t("已停止", "Stopped") : t("音频处理完成", "Audio processing complete")
             } catch {
                 if Task.isCancelled && !(error is TranslationRecordingError) { status = t("已停止", "Stopped") }
                 else {
@@ -189,7 +236,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             let translation = includeTranslation && item.translationFinal ? item.translation ?? "" : ""
             guard !source.isEmpty || !translation.isEmpty else { continue }
 
-            var heading = item.microphone ? t("麦克风", "Microphone") : t("电脑声音", "System audio")
+            var heading = sourceLabel(item)
             if item.speakerID > 0 {
                 let speakerID = "\(t("说话人", "Speaker")) \(item.speakerID)"
                 let speaker = speakerNames[item.speakerID].map {
@@ -242,6 +289,11 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         return escaped
     }
 
+    func sourceLabel(_ item: TranslationCaption) -> String {
+        if fileSession { return t("导入音频", "Imported audio") }
+        return item.microphone ? t("麦克风", "Microphone") : t("电脑声音", "System audio")
+    }
+
     private func t(_ chinese: String, _ english: String) -> String {
         SettingsManager.shared.language == "en-US" ? english : chinese
     }
@@ -253,11 +305,12 @@ private struct TranslationWindowView: View {
     @State private var confirmingClear = false
 
     private enum AudioSource: Hashable {
-        case none, system, microphone, both
+        case none, system, microphone, both, file
     }
 
     private var audioSource: Binding<AudioSource> {
         Binding {
+            if controller.audioFile != nil { return .file }
             switch (settings.translationOptions.systemAudio, settings.translationOptions.microphone) {
             case (true, true): return .both
             case (true, false): return .system
@@ -265,6 +318,11 @@ private struct TranslationWindowView: View {
             case (false, false): return .none
             }
         } set: { source in
+            if source == .file {
+                controller.chooseAudioFile()
+                return
+            }
+            controller.setAudioFile(nil)
             var options = settings.translationOptions
             options.systemAudio = source == .system || source == .both
             options.microphone = source == .microphone || source == .both
@@ -280,7 +338,7 @@ private struct TranslationWindowView: View {
         return controller.twoWaySession ? t("互译结束", "End two-way translation") : t("翻译结束", "End translation")
     }
     private var canStartTwoWay: Bool {
-        !controller.transcribeOnly && settings.translationOptions.canTranslateTwoWay
+        !controller.transcribeOnly && controller.sessionOptions.canTranslateTwoWay
     }
     private var line: Color {
         dark ? Color(red: 0.20, green: 0.25, blue: 0.35) : Color(red: 0.85, green: 0.88, blue: 0.93)
@@ -296,6 +354,7 @@ private struct TranslationWindowView: View {
                     Text(t("电脑声音", "System audio")).tag(AudioSource.system)
                     Text(t("麦克风", "Microphone")).tag(AudioSource.microphone)
                     Text(t("电脑声＋麦克风", "System + mic")).tag(AudioSource.both)
+                    Text(t("导入音频", "Import audio")).tag(AudioSource.file)
                 }
                 .labelsHidden()
                 .fixedSize()
@@ -330,6 +389,15 @@ private struct TranslationWindowView: View {
                 .disabled(controller.captions.isEmpty)
             }
 
+            if let file = controller.audioFile {
+                Button { controller.chooseAudioFile() } label: {
+                    Label(t("已选择 · ", "Selected · ") + file.lastPathComponent, systemImage: "waveform")
+                        .lineLimit(1)
+                }
+                .help(file.path + "\n" + t("点击更换音频文件", "Click to choose another audio file"))
+                .disabled(controller.running)
+            }
+
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -361,15 +429,23 @@ private struct TranslationWindowView: View {
         }
         .padding(12)
         .frame(minWidth: 670, minHeight: 270)
+        .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+            guard !controller.running, providers.count == 1, let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: NSURL.self) { url, _ in
+                guard let file = url as? URL else { return }
+                Task { @MainActor in _ = controller.importAudio(file) }
+            }
+            return true
+        }
         .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 0.965, green: 0.973, blue: 0.988))
         .preferredColorScheme(dark ? .dark : .light)
         .sheet(isPresented: $confirmingClear) { clearConfirmation }
-        .onChange(of: settings.translationOptions.availableSourceLanguages) { available in
+        .onChange(of: controller.sessionOptions.sessionSourceLanguages) { available in
             if !controller.running {
                 controller.sourceLanguage = TranslationOptions.selectLanguage(controller.sourceLanguage, from: available)
             }
         }
-        .onChange(of: settings.translationOptions.targetLanguages(for: controller.sourceLanguage)) { available in
+        .onChange(of: controller.sessionOptions.targetLanguages(for: controller.sourceLanguage)) { available in
             if !controller.running {
                 controller.targetLanguage = TranslationOptions.selectLanguage(controller.targetLanguage, from: available, fallback: "English")
             }
@@ -380,11 +456,11 @@ private struct TranslationWindowView: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Picker(t("源语言", "Source language"), selection: $controller.sourceLanguage) {
-                    translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
+                    translationLanguageChoices(controller.sessionOptions.sessionSourceLanguages, english: settings.language == "en-US")
                 }
                 .labelsHidden()
                 .frame(width: 110)
-                .disabled(settings.translationOptions.availableSourceLanguages.isEmpty)
+                .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
                 Button { controller.swapLanguages() } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
@@ -392,11 +468,11 @@ private struct TranslationWindowView: View {
                 .help(t("交换语言", "Swap languages"))
                 .disabled(!controller.canSwapLanguages)
                 Picker(t("目标语言", "Target language"), selection: $controller.targetLanguage) {
-                    translationLanguageChoices(settings.translationOptions.targetLanguages(for: controller.sourceLanguage), english: settings.language == "en-US")
+                    translationLanguageChoices(controller.sessionOptions.targetLanguages(for: controller.sourceLanguage), english: settings.language == "en-US")
                 }
                 .labelsHidden()
                 .frame(width: 110)
-                .disabled(controller.transcribeOnly || settings.translationOptions.availableTargetLanguages.isEmpty)
+                .disabled(controller.transcribeOnly || controller.sessionOptions.availableTargetLanguages.isEmpty)
             }
             .disabled(controller.running)
             Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
@@ -410,7 +486,7 @@ private struct TranslationWindowView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .fixedSize()
-                .disabled(controller.running)
+                .disabled(controller.running || controller.audioFile != nil)
             sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .padding(.leading, 4)
             if !controller.running {
@@ -448,7 +524,7 @@ private struct TranslationWindowView: View {
 
     private var twoWayHelp: String {
         if controller.transcribeOnly { return t("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation") }
-        if !settings.translationOptions.canTranslateTwoWay {
+        if !controller.sessionOptions.canTranslateTwoWay {
             return t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
         }
         return t("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
@@ -559,8 +635,8 @@ private struct TranslationWindowView: View {
                     .textSelection(.enabled)
             }
             HStack(spacing: 8) {
-                Label(caption.microphone ? t("麦克风", "Microphone") : t("电脑声音", "System audio"),
-                      systemImage: caption.microphone ? "mic" : "speaker.wave.2")
+                Label(controller.sourceLabel(caption),
+                      systemImage: controller.fileSession ? "waveform" : caption.microphone ? "mic" : "speaker.wave.2")
                     .foregroundStyle(.secondary)
                 if caption.speakerID > 0 {
                     SpeakerNameView(controller: controller, speakerID: caption.speakerID,

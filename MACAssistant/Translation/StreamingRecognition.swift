@@ -6,6 +6,7 @@ import Foundation
 final class StreamingRecognition {
     private var capture: TranslationAudioCapture?
     private var process: Process?
+    private var fileDecoder: Process?
     private var recording: TranslationRecording?
 
     func stop() {
@@ -13,6 +14,8 @@ final class StreamingRecognition {
         capture = nil
         if let process, process.isRunning { process.terminate() }
         process = nil
+        if let fileDecoder, fileDecoder.isRunning { fileDecoder.terminate() }
+        fileDecoder = nil
     }
 
     func finishRecording() async throws -> URL? {
@@ -22,6 +25,119 @@ final class StreamingRecognition {
     }
 
     typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> String
+
+    func runFile(model: StreamingSpeechModel, archive: String, file: URL, ready: () -> Void,
+                 caption: (TranslationCaption) -> Void, diagnostic: TranslationDiagnosticLog?) async throws {
+        let preparation = Task.detached { try Self.prepareModel(model, archive: archive, diagnostic: diagnostic) }
+        let directory = try await withTaskCancellationHandler(operation: { try await preparation.value },
+                                                              onCancel: { preparation.cancel() })
+        try Task.checkCancellation()
+        let contents = Bundle.main.bundleURL.appendingPathComponent("Contents")
+        let pipe = Pipe()
+        let output = Pipe()
+        let writer = pipe.fileHandleForWriting
+        guard fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            throw TranslationError("无法初始化文件识别通道。", "Could not initialize the file recognition pipe.")
+        }
+        let helper = Process()
+        helper.executableURL = contents.appendingPathComponent("Helpers/streaming-asr")
+        helper.currentDirectoryURL = directory
+        helper.arguments = ["1", contents.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["ASSISTANT_FILE_TRANSCRIPTION"] = "1"
+        environment["ASSISTANT_MIC_VAD"] = "off"
+        helper.environment = environment
+        helper.standardInput = pipe
+        helper.standardOutput = output
+        let (lines, events) = AsyncThrowingStream<String, Error>.makeStream()
+        let reader = StreamingLineReader(events: events)
+        output.fileHandleForReading.readabilityHandler = { reader.read($0) }
+        defer {
+            output.fileHandleForReading.readabilityHandler = nil
+            stop()
+        }
+        diagnostic?.watch(helper, name: "file_asr")
+        try helper.run()
+        process = helper
+
+        var received = lines.makeAsyncIterator()
+        let deadline = Task {
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+            events.finish(throwing: TranslationError("加载音频识别模型超时。", "Audio recognition model load timed out."))
+        }
+        defer { deadline.cancel() }
+        guard try await received.next() == "ready" else {
+            throw TranslationError("音频文件识别引擎启动失败。", "Could not start audio file recognition.")
+        }
+        deadline.cancel()
+        try Task.checkCancellation()
+
+        let decoder = Process()
+        let pcm = Pipe()
+        decoder.executableURL = contents.appendingPathComponent("Helpers/ffmpeg")
+        decoder.arguments = ["-nostdin", "-v", "error", "-i", file.path, "-map", "0:a:0",
+                             "-ac", "1", "-ar", "16000", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]
+        decoder.standardOutput = pcm
+        decoder.standardError = FileHandle.nullDevice
+        try decoder.run()
+        fileDecoder = decoder
+        ready()
+        let feed = Task.detached {
+            defer { try? writer.close() }
+            let packetBytes = 4096 * MemoryLayout<Float>.size
+            var buffer = Data()
+            var receivedAudio = false
+            while let bytes = try pcm.fileHandleForReading.read(upToCount: packetBytes - buffer.count), !bytes.isEmpty {
+                try Task.checkCancellation()
+                buffer.append(bytes)
+                if buffer.count == packetBytes {
+                    try send(buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                    receivedAudio = true
+                }
+            }
+            if !buffer.isEmpty {
+                try send(buffer)
+                receivedAudio = true
+            }
+            decoder.waitUntilExit()
+            guard receivedAudio, decoder.terminationStatus == 0 else {
+                throw TranslationError("无法读取选定的音频文件。", "Could not read the selected audio file.")
+            }
+            let silence = Data(count: packetBytes)
+            for _ in 0..<8 { try send(silence) }
+
+            func send(_ samples: Data) throws {
+                guard samples.count % MemoryLayout<Float>.size == 0 else {
+                    throw TranslationError("音频解码数据不完整。", "Decoded audio packet is incomplete.")
+                }
+                let header: [UInt32] = [0, 16_000, UInt32(samples.count / MemoryLayout<Float>.size)]
+                try writer.write(contentsOf: header.withUnsafeBytes { Data($0) })
+                try writer.write(contentsOf: samples)
+            }
+        }
+        defer { feed.cancel() }
+
+        var paragraphCount = 0
+        while let line = try await received.next() {
+            try Task.checkCancellation()
+            let fields = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false)
+            guard fields.count == 6, fields[0] == "0", fields[1] == "1",
+                  let start = Int64(fields[3]), let end = Int64(fields[4]),
+                  fields[5].contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            paragraphCount += 1
+            let item = TranslationCaption(id: paragraphCount, microphone: false,
+                source: String(fields[5]), translation: nil, translationFinal: false, startMs: start, endMs: end)
+            caption(item)
+        }
+        try Task.checkCancellation()
+        try await feed.value
+        let exitCode = await Task.detached { helper.waitUntilExit(); return helper.terminationStatus }.value
+        guard exitCode == 0 else { throw TranslationError("音频文件识别失败。", "Audio file recognition failed.") }
+        guard paragraphCount != 0 else {
+            throw TranslationError("音频中未识别到语音。", "No speech was recognized in the audio.")
+        }
+    }
 
     func run(options: TranslationOptions, model: StreamingSpeechModel, archive: String, record: Bool, capturing: () -> Void, ready: () -> Void,
              translationReady: (() async throws -> Void)?, caption: @escaping (TranslationCaption) -> Void,

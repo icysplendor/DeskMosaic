@@ -84,26 +84,36 @@ struct TranslationOptions: Codable, Equatable {
     var standardTranslationPath: String { TranslationModelDownload.llama.resolvePath(translationModel) }
     var lmtTranslationPath: String { TranslationModelDownload.lmt.resolvePath(lmtTranslationModel) }
     var selectedTranslationModel: String { useLmtTranslation ? lmtTranslationPath : standardTranslationPath }
+    // Session-only input mode, omitted from TranslationOptions.CodingKeys.
+    var importedAudio = false
+    var sessionSourceLanguages: [String] {
+        let live = availableSourceLanguages
+        guard importedAudio, !selectedCorrectionModel.isEmpty else { return live }
+        return live + StreamingSpeechModel.correction.languages.filter { !live.contains($0) }
+    }
     var availableTargetLanguages: [String] { targetLanguages(for: selectedSourceLanguage) }
 
     func targetLanguages(for source: String) -> [String] {
         guard !selectedTranslationModel.isEmpty else { return [] }
         let hubs = ["Chinese", "English"]
         let limitToHubs = useLmtTranslation && source != "auto" && !hubs.contains(source)
-        return availableSourceLanguages.filter { id in
+        return sessionSourceLanguages.filter { id in
             Self.languages.contains { $0.id == id } && (!limitToHubs || hubs.contains(id))
         }
     }
     var canTranslateTwoWay: Bool { !selectedTranslationModel.isEmpty && modelForSource("auto") != nil }
-    var selectedSourceLanguage: String { twoWay ? "auto" : Self.selectLanguage(sourceLanguage, from: availableSourceLanguages) }
+    var selectedSourceLanguage: String { twoWay ? "auto" : Self.selectLanguage(sourceLanguage, from: sessionSourceLanguages) }
     var selectedTargetLanguage: String { Self.selectLanguage(targetLanguage, from: availableTargetLanguages, fallback: "English") }
 
     func path(for model: StreamingSpeechModel) -> String {
-        model.download.resolvePath(model.id == "zh-en" ? streamingModel : additionalStreamingModels[model.id])
+        if model.id == StreamingSpeechModel.correction.id { return selectedCorrectionModel }
+        return model.download.resolvePath(model.id == "zh-en" ? streamingModel : additionalStreamingModels[model.id])
     }
 
     func modelForSource(_ source: String) -> StreamingSpeechModel? {
-        StreamingSpeechModel.catalog.first { $0.languages.contains(source) && !path(for: $0).isEmpty }
+        let preferred = StreamingSpeechModel.correction
+        if importedAudio, preferred.languages.contains(source), !selectedCorrectionModel.isEmpty { return preferred }
+        return StreamingSpeechModel.catalog.first { $0.languages.contains(source) && !path(for: $0).isEmpty }
     }
 
     mutating func selectModel(_ model: StreamingSpeechModel, path: String) {
@@ -350,13 +360,13 @@ final class TranslationEngine {
     }
 
     func run(options: TranslationOptions, capturing: () -> Void, status: @escaping (String?) -> Void,
-             caption: @escaping (TranslationCaption) -> Void, recordingSaved: ((URL) -> Void)? = nil) async throws {
+             caption: @escaping (TranslationCaption) -> Void, recordingSaved: ((URL) -> Void)? = nil, audioFile: URL? = nil) async throws {
         let diagnostic = options.diagnosticsEnabled ? (try? TranslationDiagnosticLog()) : nil
         diagnostic?.write("session_started source_language=\(options.selectedSourceLanguage) os=\(ProcessInfo.processInfo.operatingSystemVersionString)")
         defer { diagnostic?.write("session_ended") }
         do {
             try await runSession(options: options, capturing: capturing, status: status, caption: caption,
-                                 recordingSaved: recordingSaved, diagnostic: diagnostic)
+                                 recordingSaved: recordingSaved, diagnostic: diagnostic, audioFile: audioFile)
         } catch {
             if !Task.isCancelled { diagnostic?.failure("session_failed", error) }
             throw error
@@ -365,8 +375,10 @@ final class TranslationEngine {
 
     private func runSession(options: TranslationOptions, capturing: () -> Void, status: @escaping (String?) -> Void,
                             caption: @escaping (TranslationCaption) -> Void, recordingSaved: ((URL) -> Void)?,
-                            diagnostic: TranslationDiagnosticLog?) async throws {
-        guard options.microphone || options.systemAudio else {
+                            diagnostic: TranslationDiagnosticLog?, audioFile: URL?) async throws {
+        var options = options
+        options.importedAudio = audioFile != nil
+        guard audioFile != nil || options.microphone || options.systemAudio else {
             diagnostic?.write("preflight_no_audio_source")
             throw TranslationError("请选择音源。", "Select an audio source.")
         }
@@ -421,6 +433,46 @@ final class TranslationEngine {
 
         func runRecognition(captureStarted: () -> Void, translationReady: (() async throws -> Void)?,
                             translate: StreamingRecognition.Translate?) async throws {
+            if let audioFile {
+                guard let translationReady, let translate else {
+                    try await recognition.runFile(model: model, archive: options.path(for: model), file: audioFile,
+                                                  ready: { status(nil) }, caption: caption, diagnostic: diagnostic)
+                    return
+                }
+                let (paragraphs, output) = AsyncThrowingStream<TranslationCaption, Error>.makeStream()
+                captureStarted()
+                let transcription = Task {
+                    do {
+                        try await recognition.runFile(model: model, archive: options.path(for: model),
+                            file: audioFile, ready: { status(nil) }, caption: { paragraph in
+                                caption(paragraph)
+                                output.yield(paragraph)
+                            }, diagnostic: diagnostic)
+                        output.finish()
+                    } catch { output.finish(throwing: error) }
+                }
+                do {
+                    var ready = false
+                    for try await var paragraph in paragraphs {
+                        if !ready {
+                            try await translationReady()
+                            ready = true
+                        }
+                        paragraph.translation = try await translate(paragraph.source, false) { _ in }
+                        try Task.checkCancellation()
+                        paragraph.translationFinal = true
+                        caption(paragraph)
+                    }
+                    try Task.checkCancellation()
+                } catch {
+                    transcription.cancel()
+                    recognition.stop()
+                    await transcription.value
+                    throw error
+                }
+                await transcription.value
+                return
+            }
             var sessionError: Error?
             do {
                 try await recognition.run(options: options, model: model, archive: options.path(for: model),

@@ -13,6 +13,12 @@ namespace WinAssistant.Translation;
 
 internal sealed class TranslationWindow : Window
 {
+    private const int ImportSource = 3;
+    private static readonly string[] AudioExtensions = [".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".aif", ".aiff", ".webm"];
+    private string? audioFile;
+    private bool changingSource;
+    private bool fileSession;
+    private readonly Button fileNotice = new() { Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly StackPanel captions = new();
     private readonly ScrollViewer history;
     private readonly TextBlock status = new() { TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 195, VerticalAlignment = VerticalAlignment.Center };
@@ -143,10 +149,17 @@ internal sealed class TranslationWindow : Window
         audioSource.Items.Add(T("电脑声音", "System audio"));
         audioSource.Items.Add(T("麦克风", "Microphone"));
         audioSource.Items.Add(T("电脑声＋麦克风", "System + mic"));
+        audioSource.Items.Add(T("导入音频", "Import audio"));
         audioSource.SelectionChanged += (_, _) =>
         {
             int index = audioSource.SelectedIndex;
-            if (index < 0 || session is not null) return;
+            if (index < 0 || session is not null || changingSource) return;
+            if (index == ImportSource)
+            {
+                ChooseAudioFile();
+                return;
+            }
+            if (audioFile is not null) SetAudioFile(null, index);
             var options = ConfigurationStore.Shared.Configuration.Translation;
             bool system = index is 0 or 2;
             bool microphone = index is 1 or 2;
@@ -159,7 +172,7 @@ internal sealed class TranslationWindow : Window
         };
         sourceLanguage.SelectionChanged += (_, _) =>
         {
-            var options = ConfigurationStore.Shared.Configuration.Translation;
+            var options = SessionOptions();
             if (options.UseLmtTranslation && sourceLanguage.SelectedValue is string source)
             {
                 var available = options.TargetLanguagesFor(source);
@@ -263,6 +276,23 @@ internal sealed class TranslationWindow : Window
             field.Children.Add(picker);
             toolbar.Children.Add(field);
         }
+        fileNotice.Style = (Style)Resources["CaptionButton"];
+        fileNotice.MaxWidth = 640;
+        fileNotice.Margin = new Thickness(0, 0, 0, 8);
+        fileNotice.Click += (_, _) => ChooseAudioFile();
+        DockPanel.SetDock(fileNotice, Dock.Top);
+        root.Children.Insert(2, fileNotice);
+        AllowDrop = true;
+        PreviewDragOver += (_, args) =>
+        {
+            args.Effects = session is null && DropFile(args.Data) is not null ? DragDropEffects.Copy : DragDropEffects.None;
+            args.Handled = true;
+        };
+        PreviewDrop += (_, args) =>
+        {
+            if (session is null && DropFile(args.Data) is { } file) SetAudioFile(file);
+            args.Handled = true;
+        };
         Content = root;
         SetStatus(T("就绪", "Ready"));
 
@@ -287,9 +317,10 @@ internal sealed class TranslationWindow : Window
         sourceLanguage.IsEnabled = session is null && sourceLanguage.Items.Count != 0;
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
-        recordAudio.IsEnabled = session is null;
+        recordAudio.IsEnabled = session is null && audioFile is null;
+        fileNotice.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
-        var options = ConfigurationStore.Shared.Configuration.Translation;
+        var options = SessionOptions();
         bool twoWayReady = options.CanTranslateTwoWay;
         twoWay.Visibility = session is null ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
@@ -302,7 +333,7 @@ internal sealed class TranslationWindow : Window
         start.Background = start.BorderBrush = session is null ? Accent : Danger;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
             targetLanguage.SelectedValue is string target &&
-            options.AvailableSourceLanguages.Contains(target) && options.TargetLanguagesFor(target).Contains(source);
+            options.SessionSourceLanguages.Contains(target) && options.TargetLanguagesFor(target).Contains(source);
     }
 
     internal void Open()
@@ -311,6 +342,7 @@ internal sealed class TranslationWindow : Window
         showSource.IsChecked = options.ShowSource;
         if (!IsVisible && session is null)
         {
+            SetAudioFile(null);
             transcribeOnly.IsChecked = false;
             FillLanguagePicker(sourceLanguage, options.AvailableSourceLanguages, options.SelectedSourceLanguage);
             FillLanguagePicker(targetLanguage, options.AvailableTargetLanguages, options.SelectedTargetLanguage);
@@ -329,13 +361,65 @@ internal sealed class TranslationWindow : Window
                 (false, true) => 1,
                 _ => -1
             };
-            audioSource.SelectedIndex = index;
+            audioSource.SelectedIndex = audioFile is null ? index : ImportSource;
         }
         UpdateOriginals(showSource.IsChecked == true);
         Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
     }
+
+    private TranslationOptions SessionOptions()
+    {
+        var options = ConfigurationStore.Shared.Configuration.Translation.Copy();
+        options.ImportedAudio = audioFile is not null;
+        return options;
+    }
+
+    private void ChooseAudioFile()
+    {
+        if (session is not null) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = T("选择音频文件", "Choose an audio file"),
+            Filter = T("音频文件", "Audio files") + "|" + string.Join(";", AudioExtensions.Select(ext => "*" + ext))
+        };
+        if (dialog.ShowDialog(this) == true) SetAudioFile(dialog.FileName);
+        else SetAudioFile(audioFile);
+    }
+
+    private void SetAudioFile(string? file, int? liveIndex = null)
+    {
+        bool changed = audioFile != file;
+        audioFile = file;
+        var options = SessionOptions();
+        changingSource = true;
+        try
+        {
+            audioSource.SelectedIndex = file is not null ? ImportSource : liveIndex ?? ((options.SystemAudio, options.Microphone) switch
+            {
+                (true, true) => 2, (true, false) => 0, (false, true) => 1, _ => -1
+            });
+        }
+        finally { changingSource = false; }
+        fileNotice.Visibility = file is null ? Visibility.Collapsed : Visibility.Visible;
+        if (file is not null)
+        {
+            fileNotice.Content = T("已选择 · ", "Selected · ") + Path.GetFileName(file);
+            fileNotice.ToolTip = file + "\n" + T("点击更换音频文件", "Click to choose another audio file");
+        }
+        if (!changed) return;
+        var source = TranslationOptions.SelectLanguage(sourceLanguage.SelectedValue as string, options.SessionSourceLanguages);
+        var target = TranslationOptions.SelectLanguage(targetLanguage.SelectedValue as string, options.TargetLanguagesFor(source), "English");
+        FillLanguagePicker(sourceLanguage, options.SessionSourceLanguages, source);
+        FillLanguagePicker(targetLanguage, options.TargetLanguagesFor(source), target);
+        UpdateLanguageControls();
+        SetStatus(file is null ? T("就绪", "Ready") : T("已准备好处理音频", "Ready to process audio"));
+    }
+
+    private static string? DropFile(System.Windows.IDataObject data) =>
+        data.GetData(DataFormats.FileDrop) is string[] { Length: 1 } files && File.Exists(files[0]) &&
+        AudioExtensions.Contains(Path.GetExtension(files[0]), StringComparer.OrdinalIgnoreCase) ? files[0] : null;
 
     private void FillLanguagePicker(ComboBox picker, string[] available, string selected)
     {
@@ -372,7 +456,9 @@ internal sealed class TranslationWindow : Window
     {
         using var current = new CancellationTokenSource();
         session = current;
-        bool record = recordAudio.IsChecked == true;
+        string? file = audioFile;
+        fileSession = file is not null;
+        bool record = file is null && recordAudio.IsChecked == true;
         recordingSession = record;
         twoWaySession = twoWayMode;
         audioSource.IsEnabled = compute.IsEnabled = false;
@@ -381,7 +467,7 @@ internal sealed class TranslationWindow : Window
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = !fileSession && options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;
@@ -406,9 +492,14 @@ internal sealed class TranslationWindow : Window
                         T("正在采集 · 加载模型…", "Capturing audio · Loading models…"), listening: true);
             }), backend => PostCaption(() =>
             {
-                speechReady = true;
-                SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
-            }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved));
+                speechReady = !fileSession;
+                if (fileSession)
+                    SetStatus(backend is null ? T("正在识别音频文件…", "Transcribing audio file…")
+                        : T("正在处理音频 · 逐段翻译", "Processing audio · Translating") + " · " + backend, listening: true);
+                else
+                    SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
+            }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved, file));
+            if (fileSession && !current.IsCancellationRequested) result = T("音频处理完成", "Audio processing complete");
         }
         catch (Exception error) when (current.IsCancellationRequested && error is not TranslationRecordingException) { }
         catch (Exception error)
@@ -459,7 +550,7 @@ internal sealed class TranslationWindow : Window
             };
             var origin = new TextBlock
             {
-                Text = item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio"),
+                Text = SourceLabel(item),
                 FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center
             };
             var editing = new TextBlock
@@ -740,6 +831,9 @@ internal sealed class TranslationWindow : Window
         }
     }
 
+    private string SourceLabel(TranslationCaption item) => fileSession ? T("导入音频", "Imported audio")
+        : item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio");
+
     private bool ShowOriginal(TranslationCaption item, bool keepSource) =>
         sourceOnlySession ||
         !item.TranslationFinal || (keepSource || string.IsNullOrEmpty(item.Translation)) && item.Translation != item.Source;
@@ -773,7 +867,7 @@ internal sealed class TranslationWindow : Window
             string translation = includeTranslation && item.TranslationFinal ? item.Translation ?? "" : "";
             if (source.Length == 0 && translation.Length == 0) continue;
 
-            string heading = item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio");
+            string heading = SourceLabel(item);
             if (item.SpeakerId > 0)
             {
                 string speakerId = $"{T("说话人", "Speaker")} {item.SpeakerId}";

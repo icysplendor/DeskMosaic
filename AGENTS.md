@@ -33,3 +33,17 @@
 - The settings window uses an application-drawn 52px title bar on both platforms instead of visible system title-bar chrome. Its shell follows the compact PulseDock/notification reference: real application icon and name at the leading edge, centered page context with an inline running indicator, a compact light/dark switch, a single bottom divider, and platform-appropriate window controls. Preserve drag/double-click behavior and resize support when changing it; do not replace the application icon with a generic colored glyph.
 - UI redesigns must cover the unified product as a whole: overview, audio, screenshot, hotkeys, general settings, and the macOS display/mouse pages. Never replace or hide an existing product capability merely to make an audio-centric layout simpler.
 - Keep output and input selectors and compact current-device controls behaviorally and visually symmetric. UI code must consume the existing manager/state layer; visual work must not duplicate device identity, profile persistence, or system API logic in views.
+
+## Local desktop builds
+
+- Build the macOS Apple Silicon app on an Apple Silicon Mac with Xcode selected and pkg-config installed. The Linux Docker host can cross-build Windows but does not run the native Xcode, codesign, and hdiutil pipeline. The same macOS script can run inside a macOS virtual machine on an Apple Silicon host.
+- For local Mac packages, keep one certificate-backed Code Signing identity in the Mac's keychain. Set DESKMOSAIC_MAC_SIGN_IDENTITY to that exact identity and run bash scripts/build-local-macos.sh. The script uses it for the application, helpers and dylibs and verifies subsequent packages in the same output directory against the original app’s signing requirement. Set DESKMOSAIC_MAC_REFERENCE_APP to a previous copy signed with the same identity when testing upgrade compatibility. Confirm screen recording, microphone and Accessibility permissions by launching both versions on a Mac. Keep private keys out of the repository and build images. Public Developer ID signing and notarization remain in the GitHub workflow.
+- For a local Windows x64 package, build and reuse the Windows builder image. Run these commands from the checkout root. The output directory also retains checked download inputs for subsequent builds.
+
+  ```sh
+  docker build -f scripts/windows-local.Dockerfile -t deskmosaic-windows-builder:net8 scripts
+  mkdir -p build/local-windows
+  docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" \
+    -v "$PWD:/src:ro" -v "$PWD/build/local-windows:/output" \
+    deskmosaic-windows-builder:net8 bash /src/scripts/build-local-windows.sh /output
+  ```

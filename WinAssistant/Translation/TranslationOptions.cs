@@ -48,24 +48,32 @@ public sealed class TranslationOptions
     internal string StandardTranslationPath => TranslationModelDownload.Llama.ResolvePath(TranslationModel);
     internal string LmtTranslationPath => TranslationModelDownload.Lmt.ResolvePath(LmtTranslationModel);
     internal string SelectedTranslationModel => UseLmtTranslation ? LmtTranslationPath : StandardTranslationPath;
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal bool ImportedAudio { get; set; }
+    internal string[] SessionSourceLanguages => ImportedAudio && SelectedCorrectionModel.Length != 0
+        ? AvailableSourceLanguages.Concat(StreamingSpeechModel.Correction.Languages).Distinct().ToArray()
+        : AvailableSourceLanguages;
     internal string[] AvailableTargetLanguages => TargetLanguagesFor(SelectedSourceLanguage);
 
     internal string[] TargetLanguagesFor(string source)
     {
         if (SelectedTranslationModel.Length == 0) return [];
         bool limitToHubs = UseLmtTranslation && source is not ("auto" or "Chinese" or "English");
-        return AvailableSourceLanguages.Where(id => Languages.Any(language => language.Id == id) &&
+        return SessionSourceLanguages.Where(id => Languages.Any(language => language.Id == id) &&
             (!limitToHubs || id is "Chinese" or "English")).ToArray();
     }
     internal bool CanTranslateTwoWay => SelectedTranslationModel.Length != 0 && ModelForSource("auto") is not null;
-    internal string SelectedSourceLanguage => TwoWay ? "auto" : SelectLanguage(SourceLanguage, AvailableSourceLanguages);
+    internal string SelectedSourceLanguage => TwoWay ? "auto" : SelectLanguage(SourceLanguage, SessionSourceLanguages);
     internal string SelectedTargetLanguage => SelectLanguage(TargetLanguage, AvailableTargetLanguages, "English");
 
-    internal string PathFor(StreamingSpeechModel model) => model.Download.ResolvePath(
-        model.Id == "zh-en" ? StreamingModel : AdditionalStreamingModels?.GetValueOrDefault(model.Id));
+    internal string PathFor(StreamingSpeechModel model) => model.Id == StreamingSpeechModel.Correction.Id
+        ? SelectedCorrectionModel : model.Download.ResolvePath(
+            model.Id == "zh-en" ? StreamingModel : AdditionalStreamingModels?.GetValueOrDefault(model.Id));
 
-    internal StreamingSpeechModel? ModelForSource(string source) => StreamingSpeechModel.Catalog
-        .FirstOrDefault(model => model.Languages.Contains(source) && PathFor(model).Length != 0);
+    internal StreamingSpeechModel? ModelForSource(string source) =>
+        ImportedAudio && StreamingSpeechModel.Correction.Languages.Contains(source) && SelectedCorrectionModel.Length != 0
+            ? StreamingSpeechModel.Correction
+            : StreamingSpeechModel.Catalog.FirstOrDefault(model => model.Languages.Contains(source) && PathFor(model).Length != 0);
 
     internal void SelectModel(StreamingSpeechModel model, string path)
     {

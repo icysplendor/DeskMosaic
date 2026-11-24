@@ -80,11 +80,14 @@ export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
 unset PKG_CONFIG_PATH
 (
   cd "$ffmpeg"
-  # Keep only the raw BGRA -> H.264 -> fragmented MP4 pipeline used by the app.
+  # Enable screen recording and local audio import formats only.
   ./configure --disable-autodetect --disable-network --disable-doc --disable-debug \
     --disable-ffplay --disable-ffprobe --disable-avdevice --disable-everything \
     --enable-gpl --enable-libx264 --pkg-config-flags=--static \
-    --enable-protocol=pipe --enable-demuxer=rawvideo --enable-decoder=rawvideo \
+    --enable-protocol=file,pipe \
+    --enable-demuxer=rawvideo,wav,mp3,mov,aac,flac,ogg,matroska,aiff \
+    --enable-decoder=rawvideo,aac,alac,flac,mp3,opus,vorbis,pcm_f32le,pcm_f64le,pcm_s16le,pcm_s24le,pcm_s32le,pcm_u8,pcm_s16be,pcm_s24be,pcm_s32be \
+    --enable-filter=aresample,aformat --enable-encoder=pcm_f32le --enable-muxer=pcm_f32le \
     --enable-filter=scale --enable-encoder=libx264 --enable-muxer=mp4 "${ffmpeg_flags[@]}"
   make -j "$jobs" "$binary"
 )

@@ -9,6 +9,95 @@ namespace WinAssistant.Translation;
 
 internal static class StreamingRecognition
 {
+    internal static async Task RunFileAsync(StreamingSpeechModel speechModel, string archive,
+        string audioFile, Action ready, Action<TranslationCaption> caption, CancellationToken token)
+    {
+        const int rate = 16_000;
+        string executable = BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe");
+        string model = await PrepareModel(speechModel, archive, token, _ => { });
+        string encoder = WinAssistant.Screenshot.RegionRecording.FindEncoder();
+        using var helper = Start(executable, model, true, ["1", "-"], environment: new()
+        {
+            ["ASSISTANT_FILE_TRANSCRIPTION"] = "1",
+            ["ASSISTANT_MIC_VAD"] = "off"
+        });
+        using var terminateHelper = token.Register(() => Kill(helper));
+        try
+        {
+            using (var startup = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                startup.CancelAfter(TimeSpan.FromSeconds(60));
+                if (await helper.StandardOutput.ReadLineAsync(startup.Token) != "ready")
+                    throw new InvalidOperationException("音频文件识别引擎启动失败。 / Could not start audio file recognition.");
+            }
+
+            var input = new ProcessStartInfo(encoder)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            string[] arguments = ["-nostdin", "-v", "error", "-i", audioFile, "-map", "0:a:0",
+                "-ac", "1", "-ar", "16000", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"];
+            foreach (var argument in arguments) input.ArgumentList.Add(argument);
+            using var decoder = Process.Start(input) ?? throw new InvalidOperationException("Could not start audio decoder.");
+            using var terminateDecoder = token.Register(() => Kill(decoder));
+            var diagnostics = decoder.StandardError.BaseStream.CopyToAsync(Stream.Null, token);
+            ready();
+            int paragraphCount = 0;
+            await Task.WhenAll(FeedAudio(), ReadParagraphs());
+            if (helper.ExitCode != 0) throw new IOException("音频文件识别失败。 / Audio file recognition failed.");
+            if (paragraphCount == 0) throw new InvalidDataException("音频中未识别到语音。 / No speech was recognized in the audio.");
+
+            async Task FeedAudio()
+            {
+                await using var output = helper.StandardInput.BaseStream;
+                Stream pcm = decoder.StandardOutput.BaseStream;
+                var packet = new byte[12 + 4096 * sizeof(float)];
+                BinaryPrimitives.WriteInt32LittleEndian(packet.AsSpan(4), rate);
+                bool receivedAudio = false;
+                try
+                {
+                    int count;
+                    while ((count = await pcm.ReadAtLeastAsync(packet.AsMemory(12), packet.Length - 12, false, token)) != 0)
+                    {
+                        if (count % sizeof(float) != 0) throw new InvalidDataException("Invalid decoded audio.");
+                        receivedAudio = true;
+                        await Send(packet, count);
+                    }
+                    await decoder.WaitForExitAsync(token);
+                    await diagnostics;
+                    if (!receivedAudio || decoder.ExitCode != 0)
+                        throw new IOException("无法读取选定的音频文件。 / Could not read the selected audio file.");
+                    // Supply right context and finalize the last spoken paragraph.
+                    Array.Clear(packet, 12, packet.Length - 12);
+                    for (int index = 0; index < 8; index++) await Send(packet, packet.Length - 12);
+                }
+                finally { Kill(decoder); }
+
+                async Task Send(byte[] frame, int count)
+                {
+                    BinaryPrimitives.WriteInt32LittleEndian(frame.AsSpan(8), count / sizeof(float));
+                    await output.WriteAsync(frame.AsMemory(0, 12 + count), token);
+                }
+            }
+
+            async Task ReadParagraphs()
+            {
+                while (await helper.StandardOutput.ReadLineAsync(token) is { } line)
+                {
+                    var fields = line.Split('\t', 6);
+                    if (fields.Length != 6 || fields[0] != "0" || fields[1] != "1" ||
+                        !long.TryParse(fields[3], out long start) || !long.TryParse(fields[4], out long end) ||
+                        !fields[5].Any(char.IsLetterOrDigit)) continue;
+                    var paragraph = new TranslationCaption(++paragraphCount, false, fields[5], null,
+                        TranslationFinal: false, StartMs: start, EndMs: end);
+                    caption(paragraph);
+                }
+                await helper.WaitForExitAsync(token);
+            }
+        }
+        finally { Kill(helper); }
+    }
+
     internal static async Task RunAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive, Action capturing, Action ready, Func<Task>? translationReady,
         Action<TranslationCaption> caption, Func<string, bool, Action<string>, CancellationToken, Task<string>>? translate, CancellationToken token, Action<string>? recordingSaved = null)
     {

@@ -44,12 +44,12 @@ unzip -p "$work/ort-mac.zip" '*/LICENSE' > "$licenses/onnxruntime-LICENSE.txt"
 unzip -p "$work/ort-mac.zip" '*/ThirdPartyNotices.txt' > "$licenses/onnxruntime-ThirdPartyNotices.txt"
 
 timestamp=--timestamp
-if [[ "$identity" == "-" ]]; then timestamp=--timestamp=none; fi
+if [[ "$identity" == "-" || "${DESKMOSAIC_MAC_LOCAL_SIGNING:-0}" == 1 ]]; then timestamp=--timestamp=none; fi
 for component in "$libraries/"*.dylib "$diarization/"*.dylib "$helpers/llama-server" "$helpers/streaming-asr"; do
   if [[ ! -L "$component" ]]; then
     signing_options=(--force --options runtime "$timestamp" --sign "$identity")
-    if [[ "$identity" == "-" && ( "$component" == "$helpers/llama-server" || "$component" == "$helpers/streaming-asr" ) ]]; then
-      # Ad-hoc signatures have no Team ID to match against the bundled libraries.
+    if [[ ( "$identity" == "-" || "${DESKMOSAIC_MAC_LOCAL_SIGNING:-0}" == 1 ) && ( "$component" == "$helpers/llama-server" || "$component" == "$helpers/streaming-asr" ) ]]; then
+      # Local signatures have no Apple-issued Team ID for library validation.
       signing_options+=(--entitlements "$scripts/macos-adhoc-translation.entitlements")
     fi
     codesign "${signing_options[@]}" "$component"

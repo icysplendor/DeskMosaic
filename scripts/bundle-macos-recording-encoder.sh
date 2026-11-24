@@ -12,5 +12,5 @@ install -m 644 "$encoder/ffmpeg-license.txt" "$app/Contents/Resources/RecordingL
 lipo "$helper" -verify_arch arm64
 
 timestamp=--timestamp
-if [[ "$identity" == "-" ]]; then timestamp=--timestamp=none; fi
+if [[ "$identity" == "-" || "${DESKMOSAIC_MAC_LOCAL_SIGNING:-0}" == 1 ]]; then timestamp=--timestamp=none; fi
 codesign --force --options runtime "$timestamp" --sign "$identity" "$helper"

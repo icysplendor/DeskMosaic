@@ -220,6 +220,7 @@ int main(int argc, char **argv) {
     startup_diagnostic("speaker_model_ready");
   }
 
+  int file_transcription = getenv("ASSISTANT_FILE_TRANSCRIPTION") != NULL;
   const char *mic_mode = getenv("ASSISTANT_MIC_VAD");
   const char *mic_pause = getenv("ASSISTANT_MIC_PAUSE");
   const char *vad_model = getenv("ASSISTANT_MIC_VAD_MODEL");
@@ -339,7 +340,7 @@ int main(int argc, char **argv) {
     DiarTimeline timeline = {0};
     if (online_speakers) timeline = diar_snapshot(&diar, source);
     double pause = use_microphone_vad ? microphone_pause : 1.6;
-    int silence_endpoint = (online_speakers || use_microphone_vad) && audio->quiet >= pause &&
+    int silence_endpoint = (file_transcription || online_speakers || use_microphone_vad) && audio->quiet >= pause &&
       (!online_speakers || timeline.covered >= audio->received - audio->quiet + 0.32 || audio->quiet >= 3.0);
     if (silence_endpoint) {
       // Give the last chunk its right context before finalizing the stream.
@@ -392,7 +393,7 @@ int main(int argc, char **argv) {
               CaptionRange isolated_audio = start == 0 && audio->quiet >= 0.6
                 ? (CaptionRange){audio->stream_origin, audio->last_signal + 0.20} : (CaptionRange){0};
               finalize_caption(&correction, source, 0, text, start, length, words, word_count, fallback, isolated_audio);
-            } else {
+            } else if (!file_transcription) {
               emit_caption(source, '0', 0, 0, caption_range(words, word_count, start, length, fallback),
                            text + start, length - start);
             }
