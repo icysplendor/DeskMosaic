@@ -43,7 +43,7 @@
   ```sh
   docker build -f scripts/windows-local.Dockerfile -t deskmosaic-windows-builder:net8 scripts
   mkdir -p build/local-windows
-  docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" \
+  docker run --rm --platform linux/amd64 \
     -v "$PWD:/src:ro" -v "$PWD/build/local-windows:/output" \
     deskmosaic-windows-builder:net8 bash /src/scripts/build-local-windows.sh /output
   ```
