@@ -34,7 +34,19 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
                 turns.Add(new TranslationCaption(turns.Count, Microphone, source, null, TranslationFinal: false,
                     SpeakerId: speaker, StartMs: start, EndMs: end) { SpeakerWithinParagraph = true });
         }
-        return turns.OrderBy(turn => turn.StartMs).ToArray();
+        var merged = new List<TranslationCaption>();
+        foreach (var turn in turns.OrderBy(turn => turn.StartMs))
+        {
+            if (merged.Count > 0 && turn.SpeakerId > 0 && merged[^1].SpeakerId == turn.SpeakerId)
+            {
+                var previous = merged[^1];
+                string separator = char.IsAscii(previous.Source[^1]) && char.IsAscii(turn.Source[0]) ? " " : "";
+                merged[^1] = previous with { Source = previous.Source + separator + turn.Source,
+                    EndMs = Math.Max(previous.EndMs, turn.EndMs) };
+            }
+            else merged.Add(turn);
+        }
+        return merged.ToArray();
     }
 
     internal string TimeRange => $"{FormatTime(StartMs)} – {FormatTime(EndMs)}";

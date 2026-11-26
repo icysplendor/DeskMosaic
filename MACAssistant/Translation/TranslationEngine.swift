@@ -408,7 +408,18 @@ struct TranslationCaption: Identifiable, Equatable {
                 translation: nil, translationFinal: false, speakerID: speaker, startMs: start, endMs: end,
                 speakerWithinParagraph: true))
         }
-        return turns.sorted { ($0.startMs, $0.id) < ($1.startMs, $1.id) }
+        var merged: [TranslationCaption] = []
+        for turn in turns.sorted(by: { ($0.startMs, $0.id) < ($1.startMs, $1.id) }) {
+            if var previous = merged.last, turn.speakerID > 0, previous.speakerID == turn.speakerID {
+                let separator = previous.source.last?.isASCII == true && turn.source.first?.isASCII == true ? " " : ""
+                previous.source += separator + turn.source
+                previous.endMs = max(previous.endMs, turn.endMs)
+                merged[merged.count - 1] = previous
+            } else {
+                merged.append(turn)
+            }
+        }
+        return merged
     }
 
     var timeRange: String { "\(Self.formatTime(startMs)) – \(Self.formatTime(endMs))" }

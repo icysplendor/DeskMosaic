@@ -219,10 +219,11 @@ final class StreamingRecognition {
         helper.arguments = arguments
         let correction = StreamingSpeechModel.correction
         let correctionArchive = options.selectedCorrectionModel
-        let correctParagraphs = !options.usesMossReview && options.enableCorrection && !correctionArchive.isEmpty &&
+        let correctParagraphs = !mossReview && options.enableCorrection && !correctionArchive.isEmpty &&
             correction.languages.contains(options.selectedSourceLanguage)
-        let reviewPath = options.usesMossReview ? mossPath : correctionArchive
-        diagnostic?.write("review_configuration model=\(options.reviewModel) enabled=\(options.enableCorrection) archive_found=\(!reviewPath.isEmpty) eligible=\(correctParagraphs || mossReview)")
+        let reviewPath = mossReview ? mossPath : correctionArchive
+        let reviewName = mossReview ? "moss" : "x-asr"
+        diagnostic?.write("review_configuration model=\(reviewName) enabled=\(options.enableCorrection) archive_found=\(!reviewPath.isEmpty) eligible=\(correctParagraphs || mossReview)")
         if correctParagraphs {
             helper.arguments?.append("--correction")
             helper.arguments?.append("../../\(correction.download.sha256)/\(correction.archiveDirectory)")
@@ -496,7 +497,7 @@ final class StreamingRecognition {
             let review: CaptionReview?
             switch kind {
             case "1" where !options.enableCorrection: review = .disabled
-            case "1" where options.usesMossReview: review = mossPath.isEmpty ? .modelMissing : .unavailable
+            case "1" where mossReview: review = .unavailable
             case "1" where !correction.languages.contains(options.selectedSourceLanguage): review = .languageUnsupported
             case "1" where correctionArchive.isEmpty: review = .modelMissing
             case "1": review = .unavailable

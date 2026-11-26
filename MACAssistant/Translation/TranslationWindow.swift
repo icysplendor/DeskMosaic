@@ -504,6 +504,7 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running || controller.audioFile != nil)
+            advancedReviewButton
             sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .disabled(controller.fileCompleted)
                 .padding(.leading, 4)
@@ -527,6 +528,42 @@ private struct TranslationWindowView: View {
             .help(controller.savedRecording?.path ?? controller.status)
             .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
         }
+    }
+
+    private var advancedReviewButton: some View {
+        let options = settings.translationOptions
+        let mossReady = !options.selectedMossModel.isEmpty
+        let unavailable = !mossReady && options.selectedCorrectionModel.isEmpty
+        let active = mossReady && options.enableCorrection && options.usesMossReview
+        let label = t("高级复核", "Advanced review")
+        let help = unavailable ? t("未安装复核模型", "No review model installed")
+            : !mossReady ? t("下载 MOSS 后可开启", "Install MOSS to enable")
+            : controller.audioFile != nil ? t("仅用于实时录写", "Available for live transcription")
+            : active ? t("关闭高级复核", "Disable advanced review") : t("开启高级复核", "Enable advanced review")
+        return HStack(spacing: 0) {
+            Button {
+                var updated = settings.translationOptions
+                guard !updated.selectedMossModel.isEmpty else { return }
+                updated.reviewModel = active ? "x-asr" : "moss"
+                if !active { updated.enableCorrection = true }
+                settings.setTranslationOptions(updated)
+            } label: {
+                Image(systemName: unavailable ? "exclamationmark.circle" : active ? "checkmark.seal.fill" : "checkmark.seal")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(unavailable ? Color.orange : active ? accent : Color.secondary)
+                    .frame(width: 30, height: 23)
+                    .background(active ? accent.opacity(0.14) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(active ? accent.opacity(0.35) : line))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!mossReady || controller.running || controller.audioFile != nil)
+            .accessibilityLabel(label)
+            .accessibilityValue(Text(active ? t("开启", "On") : t("关闭", "Off")))
+            .accessibilityHint(Text(help))
+        }
+        .contentShape(Rectangle())
+        .help(help)
     }
 
     private func sessionButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -677,12 +714,15 @@ private struct TranslationWindowView: View {
             if caption.reviewTurns.isEmpty {
                 captionContent(caption)
             } else {
-                Text(captionReviewLabel(.mossReviewed))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
                 ForEach(caption.reviewTurns) { turn in
                     captionContent(turn)
                 }
+                Divider().overlay(line)
+                HStack(spacing: 8) {
+                    Text(caption.timeRange).monospacedDigit().foregroundStyle(.secondary)
+                    Text(captionReviewLabel(.mossReviewed)).foregroundStyle(accent)
+                }
+                .font(.system(size: 11))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -857,44 +897,16 @@ struct TranslationSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            section(t("语言与推理", "Languages and compute")) {
-                Picker(t("默认源语言", "Default source language"), selection: Binding(
-                    get: { settings.translationOptions.selectedSourceLanguage },
-                    set: { settings.translationBinding(\.sourceLanguage).wrappedValue = $0 }
-                )) {
-                    translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
+            section(t("实时识别", "Live recognition")) {
+                settingRow(t("默认源语言", "Default source language")) {
+                    Picker("", selection: Binding(
+                        get: { settings.translationOptions.selectedSourceLanguage },
+                        set: { settings.translationBinding(\.sourceLanguage).wrappedValue = $0 }
+                    )) {
+                        translationLanguageChoices(settings.translationOptions.availableSourceLanguages, english: settings.language == "en-US")
+                    }
+                    .disabled(settings.translationOptions.availableSourceLanguages.isEmpty)
                 }
-                .frame(width: 330)
-                .disabled(settings.translationOptions.availableSourceLanguages.isEmpty)
-                Picker(t("默认目标语言", "Default target language"), selection: Binding(
-                    get: { settings.translationOptions.selectedTargetLanguage },
-                    set: { settings.translationBinding(\.targetLanguage).wrappedValue = $0 }
-                )) {
-                    translationLanguageChoices(settings.translationOptions.availableTargetLanguages, english: settings.language == "en-US")
-                }
-                .frame(width: 330)
-                .disabled(settings.translationOptions.availableTargetLanguages.isEmpty)
-                Picker(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute)) {
-                    Text(t("自动", "Automatic")).tag("auto")
-                    Text("CPU").tag("cpu")
-                    Text(t("优先 GPU", "Prefer GPU")).tag("gpu")
-                }
-                .frame(width: 290)
-            }
-            section(t("麦克风", "Microphone")) {
-                Picker(t("人声检测", "Speech detection"), selection: settings.translationBinding(\.microphoneFilter)) {
-                    Text(t("温和", "Gentle")).tag("gentle")
-                    Text(t("均衡", "Balanced")).tag("balanced")
-                    Text(t("关闭", "Off")).tag("off")
-                }
-                .frame(width: 290)
-                Picker(t("断句等待", "End-of-speech pause"), selection: settings.translationBinding(\.microphonePause)) {
-                    Text(t("标准", "Standard")).tag("normal")
-                    Text(t("较长", "Longer")).tag("long")
-                }
-                .frame(width: 290)
-            }
-            section(t("识别与说话人", "Speech and speakers")) {
                 ForEach(StreamingSpeechModel.catalog) { speech in
                     file(t(speech.chinese, speech.english), path: Binding(
                         get: { settings.translationOptions.path(for: speech) },
@@ -905,40 +917,59 @@ struct TranslationSettingsView: View {
                         }
                     ), url: speech.download.url, type: .data, model: speech.download)
                 }
-                let correction = StreamingSpeechModel.correction
-                file(t(correction.chinese, correction.english), path: Binding(
-                    get: { settings.translationOptions.selectedCorrectionModel },
-                    set: { settings.translationBinding(\.correctionModel).wrappedValue = $0 }
-                ), url: correction.download.url, type: .data, model: correction.download)
-                Toggle(t("模型就绪时启用段末修正", "Enable second pass when installed"),
-                       isOn: settings.translationBinding(\.enableCorrection))
-                Picker(t("段末复核模型", "Second-pass model"), selection: settings.translationBinding(\.reviewModel)) {
-                    Text("X-ASR 1920 ms").tag("x-asr")
-                    Text("MOSS 0.9B Q8").tag("moss")
-                }
-                .frame(width: 290)
-                .disabled(!settings.translationOptions.enableCorrection)
-                file(t("段末复核 · MOSS 0.9B Q8", "Second pass · MOSS 0.9B Q8"), path: Binding(
-                    get: { settings.translationOptions.selectedMossModel },
-                    set: { settings.translationBinding(\.mossModel).wrappedValue = $0 }
-                ), url: TranslationModelDownload.moss.url, type: UTType(filenameExtension: "gguf"), model: .moss)
                 file(t("流式说话人模型", "Streaming speaker model"), path: Binding(
                     get: { settings.translationOptions.selectedSpeakerModel },
                     set: { settings.translationBinding(\.onlineSpeakerModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.onlineSpeaker.url, type: UTType(filenameExtension: "gguf"), model: .onlineSpeaker)
             }
-            section(t("文本翻译", "Text translation")) {
-                Picker(t("文本翻译模型", "Text translation model"), selection: settings.translationBinding(\.useLmtTranslation)) {
-                    Text("Hy-MT3 1.8B").tag(false)
-                    Text("LMT-60 0.6B").tag(true)
+            section(t("段末复核", "Second pass")) {
+                let mossReady = !settings.translationOptions.selectedMossModel.isEmpty
+                settingRow(t("启用段末复核", "Enable second pass")) {
+                    Toggle("", isOn: settings.translationBinding(\.enableCorrection))
                 }
-                .frame(width: 290)
-                Picker(t("实时译文刷新间隔", "Live translation interval"), selection: settings.translationBinding(\.previewIntervalMs)) {
-                    ForEach(TranslationOptions.previewIntervalsMs, id: \.self) { interval in
-                        Text("\((Double(interval) / 1000).formatted()) \(t("秒", "s"))").tag(interval)
+                settingRow(t("复核模型", "Review model")) {
+                    Picker("", selection: Binding(
+                        get: { mossReady && settings.translationOptions.usesMossReview ? "moss" : "x-asr" },
+                        set: { settings.translationBinding(\.reviewModel).wrappedValue = $0 }
+                    )) {
+                        Text("X-ASR 1920 ms").tag("x-asr")
+                        if mossReady { Text("MOSS 0.9B Q8").tag("moss") }
+                    }
+                    .disabled(!settings.translationOptions.enableCorrection)
+                }
+                let correction = StreamingSpeechModel.correction
+                file("X-ASR 1920 ms", path: Binding(
+                    get: { settings.translationOptions.selectedCorrectionModel },
+                    set: { settings.translationBinding(\.correctionModel).wrappedValue = $0 }
+                ), url: correction.download.url, type: .data, model: correction.download)
+                file("MOSS 0.9B Q8", path: Binding(
+                    get: { settings.translationOptions.selectedMossModel },
+                    set: { settings.translationBinding(\.mossModel).wrappedValue = $0 }
+                ), url: TranslationModelDownload.moss.url, type: UTType(filenameExtension: "gguf"), model: .moss)
+            }
+            section(t("文本翻译", "Text translation")) {
+                settingRow(t("默认目标语言", "Default target language")) {
+                    Picker("", selection: Binding(
+                        get: { settings.translationOptions.selectedTargetLanguage },
+                        set: { settings.translationBinding(\.targetLanguage).wrappedValue = $0 }
+                    )) {
+                        translationLanguageChoices(settings.translationOptions.availableTargetLanguages, english: settings.language == "en-US")
+                    }
+                    .disabled(settings.translationOptions.availableTargetLanguages.isEmpty)
+                }
+                settingRow(t("文本翻译模型", "Translation model")) {
+                    Picker("", selection: settings.translationBinding(\.useLmtTranslation)) {
+                        Text("Hy-MT3 1.8B").tag(false)
+                        Text("LMT-60 0.6B").tag(true)
                     }
                 }
-                .frame(width: 290)
+                settingRow(t("实时译文刷新间隔", "Live translation interval")) {
+                    Picker("", selection: settings.translationBinding(\.previewIntervalMs)) {
+                        ForEach(TranslationOptions.previewIntervalsMs, id: \.self) { interval in
+                            Text("\((Double(interval) / 1000).formatted()) \(t("秒", "s"))").tag(interval)
+                        }
+                    }
+                }
                 file("Hy-MT3 · 1.35 GB", path: Binding(
                     get: { settings.translationOptions.standardTranslationPath },
                     set: { path in
@@ -958,9 +989,30 @@ struct TranslationSettingsView: View {
                     }
                 ), url: TranslationModelDownload.lmt.url, type: UTType(filenameExtension: "gguf"), model: .lmt)
             }
-            section(t("诊断与高级设置", "Diagnostics and advanced")) {
-                Toggle(t("诊断日志（保存到下载）", "Diagnostic log (Downloads)"),
-                       isOn: settings.translationBinding(\.diagnosticsEnabled))
+            section(t("音频与诊断", "Audio and diagnostics")) {
+                settingRow(t("麦克风人声检测", "Microphone speech detection")) {
+                    Picker("", selection: settings.translationBinding(\.microphoneFilter)) {
+                        Text(t("温和", "Gentle")).tag("gentle")
+                        Text(t("均衡", "Balanced")).tag("balanced")
+                        Text(t("关闭", "Off")).tag("off")
+                    }
+                }
+                settingRow(t("麦克风断句等待", "Microphone end-of-speech pause")) {
+                    Picker("", selection: settings.translationBinding(\.microphonePause)) {
+                        Text(t("标准", "Standard")).tag("normal")
+                        Text(t("较长", "Longer")).tag("long")
+                    }
+                }
+                settingRow(t("推理设备", "Compute")) {
+                    Picker("", selection: settings.translationBinding(\.compute)) {
+                        Text(t("自动", "Automatic")).tag("auto")
+                        Text("CPU").tag("cpu")
+                        Text(t("优先 GPU", "Prefer GPU")).tag("gpu")
+                    }
+                }
+                settingRow(t("诊断日志（保存到下载）", "Diagnostic log (Downloads)")) {
+                    Toggle("", isOn: settings.translationBinding(\.diagnosticsEnabled))
+                }
                 DisclosureGroup(t("自定义推理引擎", "Custom inference engines")) {
                     file("llama-server / llama", path: settings.translationBinding(\.llamaServer), url: TranslationOptions.llamaRelease,
                          canReset: true)
@@ -968,6 +1020,15 @@ struct TranslationSettingsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func settingRow<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+            Spacer(minLength: 0)
+            control().labelsHidden().frame(width: 180, alignment: .trailing).accessibilityLabel(label)
+        }
+        .frame(minHeight: 26)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -986,15 +1047,23 @@ struct TranslationSettingsView: View {
         let busy = model.map { downloading.contains($0.name) } ?? false
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(label).frame(width: 150, alignment: .leading)
-                Text(path.wrappedValue.isEmpty
-                     ? (canReset ? t("自动", "Automatic") : t("未选择", "Not selected")) : URL(fileURLWithPath: path.wrappedValue).lastPathComponent)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Text(label).lineLimit(2)
+                Spacer(minLength: 4)
+                if let model {
+                    let installed = !path.wrappedValue.isEmpty
+                    HStack(spacing: 5) {
+                        Circle().fill(installed ? Color.green : Color.secondary).frame(width: 6, height: 6)
+                        Text(installed ? t("已安装", "Installed") : t("未安装", "Missing"))
+                    }
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .help(path.wrappedValue)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button(t("选择…", "Choose…")) {
+                    .fixedSize()
+                    .help(installed ? path.wrappedValue : model.name)
+                } else if canReset && !path.wrappedValue.isEmpty {
+                    Button(t("恢复自动", "Reset")) { path.wrappedValue = "" }
+                        .help(path.wrappedValue)
+                }
+                Button {
                     let panel = NSOpenPanel()
                     panel.title = label
                     panel.canChooseDirectories = false
@@ -1008,13 +1077,14 @@ struct TranslationSettingsView: View {
                             path.wrappedValue = url.path
                         }
                     }
+                } label: {
+                    Text(t("选择…", "Choose…")).frame(width: 70)
                 }
+                .frame(width: 86)
                 .disabled(busy)
-                if canReset && !path.wrappedValue.isEmpty {
-                    Button(t("恢复自动", "Reset to automatic")) { path.wrappedValue = "" }
-                }
+                .accessibilityLabel(t("选择 \(label)", "Choose \(label)"))
                 if let model {
-                    Button(busy ? t("下载并校验中…", "Downloading…") : t("下载", "Download")) {
+                    Button {
                         downloading.insert(model.name)
                         downloadErrors[model.name] = nil
                         Task {
@@ -1029,12 +1099,17 @@ struct TranslationSettingsView: View {
                                 }
                             }
                         }
+                    } label: {
+                        Text(busy ? t("下载中…", "Working…") : t("下载", "Download")).frame(width: 70)
                     }
+                    .frame(width: 86)
                     .disabled(busy)
+                    .accessibilityLabel(t("下载 \(label)", "Download \(label)"))
                 } else {
-                    Link(t("下载", "Download"), destination: url)
+                    Link(t("下载", "Download"), destination: url).frame(width: 86)
                 }
             }
+            .frame(minHeight: 26)
             if let model, let error = downloadErrors[model.name] {
                 Text(error).font(.caption).foregroundStyle(.red)
             }

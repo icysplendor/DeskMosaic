@@ -35,6 +35,9 @@ internal sealed class TranslationWindow : Window
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+    private readonly Button advancedReview = new() { Margin = new Thickness(8, 0, 0, 0) };
+    private readonly System.Windows.Shapes.Path reviewGlyph = new() { Width = 15, Height = 15, Stretch = Stretch.Uniform,
+        StrokeThickness = 1.35, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
     private readonly CheckBox showSource = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox audioSource = new() { MinWidth = 132, VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox sourceLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
@@ -213,6 +216,25 @@ internal sealed class TranslationWindow : Window
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
         languages.Children.Add(recordAudio);
+        StyleToolbarIcon(advancedReview, "\uE73E", T("高级复核", "Advanced review"));
+        advancedReview.Width = 30;
+        advancedReview.Content = reviewGlyph;
+        ToolTipService.SetShowOnDisabled(advancedReview, true);
+        advancedReview.Click += (_, _) =>
+        {
+            ConfigurationStore.Shared.Update(config =>
+            {
+                var options = config.Translation;
+                if (options.SelectedMossModel.Length == 0) return;
+                bool active = options.EnableCorrection && options.UsesMossReview;
+                options.ReviewModel = active ? "x-asr" : "moss";
+                if (!active) options.EnableCorrection = true;
+                options.MultiSpeaker = false;
+            });
+            UpdateAdvancedReview(SessionOptions());
+        };
+        Activated += (_, _) => UpdateAdvancedReview(SessionOptions());
+        languages.Children.Add(advancedReview);
         start.Margin = new Thickness(10, 0, 0, 0);
         twoWay.Margin = new Thickness(8, 0, 0, 0);
         languages.Children.Add(start);
@@ -327,6 +349,7 @@ internal sealed class TranslationWindow : Window
         fileNotice.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
         var options = SessionOptions();
+        UpdateAdvancedReview(options);
         bool twoWayReady = options.CanTranslateTwoWay;
         twoWay.Visibility = session is null && !fileCompleted ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
@@ -342,6 +365,26 @@ internal sealed class TranslationWindow : Window
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
             targetLanguage.SelectedValue is string target &&
             options.SessionSourceLanguages.Contains(target) && options.TargetLanguagesFor(target).Contains(source);
+    }
+
+    private void UpdateAdvancedReview(TranslationOptions options)
+    {
+        bool mossReady = options.SelectedMossModel.Length != 0;
+        bool unavailable = !mossReady && options.SelectedCorrectionModel.Length == 0;
+        bool active = mossReady && options.EnableCorrection && options.UsesMossReview;
+        advancedReview.IsEnabled = mossReady && session is null && audioFile is null;
+        const string ring = "M8,1 A7,7 0 1 1 7.99,1 Z ";
+        reviewGlyph.Data = Geometry.Parse(ring + (unavailable ? "M8,4.3 L8,8.7 M8,11.2 L8,11.4" : "M4.8,8.2 L7,10.4 L11.4,5.9"));
+        reviewGlyph.Stroke = unavailable ? Brushes.DarkOrange : active ? Accent : Muted;
+        advancedReview.Background = active ? (Brush)Resources["CaptionHighlight"] : (Brush)Resources["CaptionSurface"];
+        advancedReview.BorderBrush = active ? Accent : Line;
+        string help = unavailable ? T("未安装复核模型", "No review model installed")
+            : !mossReady ? T("下载 MOSS 后可开启", "Install MOSS to enable")
+            : audioFile is not null ? T("仅用于实时录写", "Available for live transcription")
+            : active ? T("关闭高级复核", "Disable advanced review") : T("开启高级复核", "Enable advanced review");
+        advancedReview.ToolTip = help;
+        AutomationProperties.SetHelpText(advancedReview, help);
+        AutomationProperties.SetItemStatus(advancedReview, active ? T("开启", "On") : T("关闭", "Off"));
     }
 
     internal void Open()
@@ -660,7 +703,7 @@ internal sealed class TranslationWindow : Window
             }
             row.Time.Text = item.TimeRange;
             row.Review.Visibility = item.Review == CaptionReview.None ? Visibility.Collapsed : Visibility.Visible;
-            row.Review.Foreground = item.Review == CaptionReview.Revised ? Accent : Muted;
+            row.Review.Foreground = item.Review is CaptionReview.Revised or CaptionReview.MossReviewed ? Accent : Muted;
             row.Review.Text = item.Review switch
             {
                 CaptionReview.Pending => T("复核中", "Reviewing"),
@@ -915,6 +958,7 @@ internal sealed class TranslationWindow : Window
                 Foreground = string.IsNullOrEmpty(turn.Translation) ? Muted : Foreground
             });
         }
+        panel.Children.Add(new Border { Height = 1, Background = Line, Margin = new Thickness(0, 7, 0, 2) });
     }
 
     private string SourceLabel(TranslationCaption item) => fileSession ? T("导入音频", "Imported audio")

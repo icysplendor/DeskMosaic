@@ -111,10 +111,10 @@ internal static class StreamingRecognition
         string correctionArchive = options.SelectedCorrectionModel;
         string mossPath = options.UsesMossReview ? options.SelectedMossModel : "";
         bool mossReview = options.EnableCorrection && mossPath.Length != 0;
-        bool correctParagraphs = !options.UsesMossReview && options.EnableCorrection && correctionArchive.Length != 0 &&
+        bool correctParagraphs = !mossReview && options.EnableCorrection && correctionArchive.Length != 0 &&
             correction.Languages.Contains(options.SelectedSourceLanguage);
-        string reviewName = options.UsesMossReview ? "moss" : "x-asr";
-        string reviewPath = options.UsesMossReview ? mossPath : correctionArchive;
+        string reviewName = mossReview ? "moss" : "x-asr";
+        string reviewPath = mossReview ? mossPath : correctionArchive;
         Log($"review_configuration model={reviewName} enabled={options.EnableCorrection} archive_found={reviewPath.Length != 0} eligible={correctParagraphs || mossReview}");
         var frames = new BufferedAudio<byte[]>();
         var signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
@@ -334,7 +334,7 @@ internal static class StreamingRecognition
                 var review = kind switch
                 {
                     "1" when !options.EnableCorrection => CaptionReview.Disabled,
-                    "1" when options.UsesMossReview => mossPath.Length == 0 ? CaptionReview.ModelMissing : CaptionReview.Unavailable,
+                    "1" when mossReview => CaptionReview.Unavailable,
                     "1" when !correction.Languages.Contains(options.SelectedSourceLanguage) => CaptionReview.LanguageUnsupported,
                     "1" when correctionArchive.Length == 0 => CaptionReview.ModelMissing,
                     "1" => CaptionReview.Unavailable,

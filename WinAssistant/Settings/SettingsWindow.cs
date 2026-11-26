@@ -1,3 +1,4 @@
+using System.Windows.Automation;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -1076,52 +1077,46 @@ internal sealed class SettingsWindow : Window
         (string Id, string Label)[] LanguageChoices(string[] available) => available.Select(id =>
             (id, id == "auto" ? T("自动识别", "Auto-detect")
                 : T(TranslationOptions.Languages.First(language => language.Id == id).Chinese, id))).ToArray();
-        BeginSection(T("语言与推理", "Languages and compute"));
+        BeginSection(T("实时识别", "Live recognition"));
         AddChoice(T("默认源语言", "Default source language"),
             LanguageChoices(options.AvailableSourceLanguages), options.SelectedSourceLanguage, value =>
             {
                 Save(item => item.SourceLanguage = value);
                 if (options.UseLmtTranslation) Render();
             });
-        AddChoice(T("默认目标语言", "Default target language"),
-            LanguageChoices(options.AvailableTargetLanguages), options.SelectedTargetLanguage, value => Save(item => item.TargetLanguage = value));
-        AddChoice(T("推理设备", "Compute"),
-            [("auto", T("自动", "Automatic")), ("cpu", "CPU"), ("gpu", T("优先 GPU", "Prefer GPU"))],
-            options.Compute, value => Save(item => item.Compute = value));
-
-        BeginSection(T("麦克风", "Microphone"));
-        AddChoice(T("人声检测", "Speech detection"),
-            [("gentle", T("温和", "Gentle")), ("balanced", T("均衡", "Balanced")), ("off", T("关闭", "Off"))],
-            options.MicrophoneFilter, value => Save(item => item.MicrophoneFilter = value));
-        AddChoice(T("断句等待", "End-of-speech pause"),
-            [("normal", T("标准", "Standard")), ("long", T("较长", "Longer"))],
-            options.MicrophonePause, value => Save(item => item.MicrophonePause = value));
-
-        BeginSection(T("识别与说话人", "Speech and speakers"));
         foreach (var speech in StreamingSpeechModel.Catalog)
         {
             AddFile(T(speech.Chinese, speech.English), options.PathFor(speech), "X-ASR (*.tar.bz2)|*.tar.bz2",
                 speech.Download.Url, value => Save(item => item.SelectModel(speech, value)), model: speech.Download);
         }
-        var correction = StreamingSpeechModel.Correction;
-        AddFile(T(correction.Chinese, correction.English), options.SelectedCorrectionModel, "X-ASR (*.tar.bz2)|*.tar.bz2",
-            correction.Download.Url, value => Save(item => item.CorrectionModel = value), model: correction.Download);
-        AddChoice(T("段末复核", "Second pass"),
-            [("on", T("模型就绪时启用", "On when installed")), ("off", T("关闭", "Off"))],
-            options.EnableCorrection ? "on" : "off", value => Save(item => item.EnableCorrection = value == "on"));
-        AddChoice(T("段末复核模型", "Second-pass model"),
-            [("x-asr", "X-ASR 1920 ms"), ("moss", "MOSS 0.9B Q8")],
-            options.UsesMossReview ? "moss" : "x-asr", value => Save(item =>
-            {
-                item.ReviewModel = value;
-                item.MultiSpeaker = false;
-            }));
-        AddFile(T("段末复核 · MOSS 0.9B Q8", "Second pass · MOSS 0.9B Q8"), options.SelectedMossModel, "GGUF (*.gguf)|*.gguf",
-            TranslationModelDownload.Moss.Url, value => Save(item => item.MossModel = value), model: TranslationModelDownload.Moss);
         AddFile(T("流式说话人模型", "Streaming speaker model"), options.SelectedSpeakerModel, "GGUF (*.gguf)|*.gguf",
             TranslationModelDownload.OnlineSpeaker.Url, value => Save(item => item.OnlineSpeakerModel = value), model: TranslationModelDownload.OnlineSpeaker);
 
+        BeginSection(T("段末复核", "Second pass"));
+        AddChoice(T("启用段末复核", "Enable second pass"),
+            [("on", T("模型就绪时启用", "On when installed")), ("off", T("关闭", "Off"))],
+            options.EnableCorrection ? "on" : "off", value =>
+            {
+                Save(item => item.EnableCorrection = value == "on");
+                Render();
+            });
+        bool mossReady = options.SelectedMossModel.Length != 0;
+        AddChoice(T("复核模型", "Review model"),
+            mossReady ? [("x-asr", "X-ASR 1920 ms"), ("moss", "MOSS 0.9B Q8")] : [("x-asr", "X-ASR 1920 ms")],
+            mossReady && options.UsesMossReview ? "moss" : "x-asr", value => Save(item =>
+            {
+                item.ReviewModel = value;
+                item.MultiSpeaker = false;
+            }), enabled: options.EnableCorrection);
+        var correction = StreamingSpeechModel.Correction;
+        AddFile("X-ASR 1920 ms", options.SelectedCorrectionModel, "X-ASR (*.tar.bz2)|*.tar.bz2",
+            correction.Download.Url, value => Save(item => item.CorrectionModel = value), model: correction.Download);
+        AddFile("MOSS 0.9B Q8", options.SelectedMossModel, "GGUF (*.gguf)|*.gguf",
+            TranslationModelDownload.Moss.Url, value => Save(item => item.MossModel = value), model: TranslationModelDownload.Moss);
+
         BeginSection(T("文本翻译", "Text translation"));
+        AddChoice(T("默认目标语言", "Default target language"),
+            LanguageChoices(options.AvailableTargetLanguages), options.SelectedTargetLanguage, value => Save(item => item.TargetLanguage = value));
         AddChoice(T("文本翻译模型", "Text translation model"),
             [("standard", "Hy-MT3 1.8B"), ("lmt", "LMT-60 0.6B")],
             options.UseLmtTranslation ? "lmt" : "standard",
@@ -1145,7 +1140,16 @@ internal sealed class SettingsWindow : Window
                 item.LmtTranslationModel = value;
                 item.UseLmtTranslation = true;
             }), model: TranslationModelDownload.Lmt);
-        BeginSection(T("诊断与高级设置", "Diagnostics and advanced"));
+        BeginSection(T("音频与诊断", "Audio and diagnostics"));
+        AddChoice(T("麦克风人声检测", "Microphone speech detection"),
+            [("gentle", T("温和", "Gentle")), ("balanced", T("均衡", "Balanced")), ("off", T("关闭", "Off"))],
+            options.MicrophoneFilter, value => Save(item => item.MicrophoneFilter = value));
+        AddChoice(T("麦克风断句等待", "Microphone end-of-speech pause"),
+            [("normal", T("标准", "Standard")), ("long", T("较长", "Longer"))],
+            options.MicrophonePause, value => Save(item => item.MicrophonePause = value));
+        AddChoice(T("推理设备", "Compute"),
+            [("auto", T("自动", "Automatic")), ("cpu", "CPU"), ("gpu", T("优先 GPU", "Prefer GPU"))],
+            options.Compute, value => Save(item => item.Compute = value));
         AddChoice(T("诊断日志（保存到下载）", "Diagnostic log (Downloads)"),
             [("on", T("开启", "On")), ("off", T("关闭", "Off"))],
             options.DiagnosticsEnabled ? "on" : "off", value => Save(item => item.DiagnosticsEnabled = value == "on"));
@@ -1171,11 +1175,12 @@ internal sealed class SettingsWindow : Window
             });
         }
 
-        void AddChoice(string label, (string Id, string Label)[] choices, string current, Action<string> change)
+        void AddChoice(string label, (string Id, string Label)[] choices, string current, Action<string> change, bool enabled = true)
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
-            row.Children.Add(new TextBlock { Text = label, Width = 145, VerticalAlignment = VerticalAlignment.Center });
-            var picker = new ComboBox { Width = 170, SelectedValuePath = "Tag", IsEnabled = choices.Length != 0 };
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8), MinHeight = 26 };
+            var picker = new ComboBox { Width = 180, SelectedValuePath = "Tag", IsEnabled = enabled && choices.Length != 0,
+                VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(picker, label);
             foreach (var choice in choices)
                 picker.Items.Add(new ComboBoxItem { Content = choice.Label, Tag = choice.Id });
             picker.SelectedValue = current;
@@ -1184,17 +1189,21 @@ internal sealed class SettingsWindow : Window
             {
                 if (picker.SelectedValue is string value) change(value);
             };
+            DockPanel.SetDock(picker, Dock.Right);
             row.Children.Add(picker);
+            row.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
             section.Children.Add(row);
         }
 
         void AddFile(string label, string path, string filter, string url, Action<string> change, StackPanel? engineOverrides = null, TranslationModelDownload? model = null)
         {
-            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
-            var name = new TextBlock { Text = label, Width = 145, VerticalAlignment = VerticalAlignment.Center };
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 8), MinHeight = 26 };
+            var name = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0), MaxWidth = 240, TextWrapping = TextWrapping.Wrap };
             DockPanel.SetDock(name, Dock.Left);
             row.Children.Add(name);
-            var download = new Button { Content = T("下载", "Download"), Margin = new Thickness(6, 0, 0, 0) };
+            var download = new Button { Content = T("下载", "Download"), Width = 86, Margin = new Thickness(8, 0, 0, 0) };
             if (model is null)
             {
                 download.Click += (_, _) => System.Diagnostics.Process.Start(
@@ -1202,14 +1211,18 @@ internal sealed class SettingsWindow : Window
             }
             DockPanel.SetDock(download, Dock.Right);
             row.Children.Add(download);
-            var choose = new Button { Content = T("选择…", "Choose…"), Margin = new Thickness(6, 0, 0, 0) };
+            var choose = new Button { Content = T("选择…", "Choose…"), Width = 86, Margin = new Thickness(8, 0, 0, 0) };
+            AutomationProperties.SetName(download, T($"下载 {label}", $"Download {label}"));
+            AutomationProperties.SetName(choose, T($"选择 {label}", $"Choose {label}"));
             DockPanel.SetDock(choose, Dock.Right);
             row.Children.Add(choose);
-            var placeholder = engineOverrides is null ? T("未选择", "Not selected") : T("自动", "Automatic");
+            var placeholder = engineOverrides is null ? T("未安装", "Missing") : T("自动", "Automatic");
             var value = new TextBlock
             {
-                Text = string.IsNullOrEmpty(path) ? placeholder : Path.GetFileName(path),
-                ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center
+                Text = string.IsNullOrEmpty(path) ? placeholder : model is null ? Path.GetFileName(path) : T("已安装", "Installed"),
+                ToolTip = path, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right, Foreground = Brush(dark ? "#A9B8CC" : "#56677D"),
+                FontSize = 12
             };
             if (engineOverrides is not null)
             {
@@ -1223,7 +1236,19 @@ internal sealed class SettingsWindow : Window
                 DockPanel.SetDock(reset, Dock.Right);
                 row.Children.Add(reset);
             }
-            row.Children.Add(value);
+            if (model is not null)
+            {
+                var state = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+                state.Children.Add(new System.Windows.Shapes.Ellipse
+                {
+                    Width = 6, Height = 6, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center,
+                    Fill = Brush(string.IsNullOrEmpty(path) ? "#8290A3" : "#279961")
+                });
+                state.Children.Add(value);
+                state.ToolTip = string.IsNullOrEmpty(path) ? model.FileName : path;
+                row.Children.Add(state);
+            }
+            else row.Children.Add(value);
             choose.Click += (_, _) =>
             {
                 var picker = new Microsoft.Win32.OpenFileDialog { Filter = filter, CheckFileExists = true };
@@ -1285,7 +1310,7 @@ internal sealed class SettingsWindow : Window
                 var downloading = modelDownloads.TryGetValue(model, out int percent);
                 download.IsEnabled = choose.IsEnabled = !downloading;
                 download.Content = downloading
-                    ? percent == 100 ? T("校验中…", "Verifying…") : $"{T("下载中", "Downloading")} {percent}%"
+                    ? percent == 100 ? T("校验中…", "Verifying…") : $"{percent}%"
                     : T("下载", "Download");
                 errorText.Text = modelDownloadErrors.GetValueOrDefault(model) ?? "";
                 errorText.Visibility = string.IsNullOrEmpty(errorText.Text) ? Visibility.Collapsed : Visibility.Visible;
