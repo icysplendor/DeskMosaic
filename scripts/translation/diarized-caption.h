@@ -101,7 +101,7 @@ static void finalize_caption(CaptionCorrection *correction, uint32_t source, int
   while (begin < end && isspace((unsigned char)text[begin])) ++begin;
   if (end == begin) return;
   CaptionRange range = caption_range(words, count, begin, end, fallback);
-  if (correction->directory) {
+  if (correction->directory || correction->moss) {
     size_t first = 0;
     while (first < count && words[first].start < begin) ++first;
     size_t next = first;

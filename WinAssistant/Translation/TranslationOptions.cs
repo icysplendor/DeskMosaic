@@ -15,10 +15,13 @@ public sealed class TranslationOptions
     }
     public string CorrectionModel { get; set; } = "";
     public bool EnableCorrection { get; set; } = true;
+    public string? ReviewModel { get; set; }
+    public string MossModel { get; set; } = "";
+    // Legacy configuration from the first MOSS test build.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool MultiSpeaker { get; set; }
     public bool DiagnosticsEnabled { get; set; }
     public string OnlineSpeakerModel { get; set; } = "";
-    public bool MultiSpeaker { get; set; }
-    public string MossModel { get; set; } = "";
     public string LlamaServer { get; set; } = "";
     public string Compute { get; set; } = "auto";
     // Existing configurations relied on automatic recognition and lack this field.
@@ -50,17 +53,18 @@ public sealed class TranslationOptions
 
     internal const string LlamaRelease = "https://github.com/ggml-org/llama.cpp/releases";
 
-    internal string[] AvailableSourceLanguages => MultiSpeaker ? ["auto"] : StreamingSpeechModel.Catalog
+    internal string[] AvailableSourceLanguages => StreamingSpeechModel.Catalog
         .Where(model => PathFor(model).Length != 0).SelectMany(model => model.Languages).ToArray();
-    internal string SelectedCorrectionModel => StreamingSpeechModel.Correction.Download.ResolvePath(CorrectionModel);
+    internal bool UsesMossReview => (ReviewModel ?? (MultiSpeaker ? "moss" : "x-asr")) == "moss";
     internal string SelectedMossModel => TranslationModelDownload.Moss.ResolvePath(MossModel);
+    internal string SelectedCorrectionModel => StreamingSpeechModel.Correction.Download.ResolvePath(CorrectionModel);
     internal string SelectedSpeakerModel => TranslationModelDownload.OnlineSpeaker.ResolvePath(OnlineSpeakerModel);
     internal string StandardTranslationPath => TranslationModelDownload.Llama.ResolvePath(TranslationModel);
     internal string LmtTranslationPath => TranslationModelDownload.Lmt.ResolvePath(LmtTranslationModel);
     internal string SelectedTranslationModel => UseLmtTranslation ? LmtTranslationPath : StandardTranslationPath;
     [System.Text.Json.Serialization.JsonIgnore]
     internal bool ImportedAudio { get; set; }
-    internal string[] SessionSourceLanguages => !MultiSpeaker && ImportedAudio && SelectedCorrectionModel.Length != 0
+    internal string[] SessionSourceLanguages => ImportedAudio && SelectedCorrectionModel.Length != 0
         ? AvailableSourceLanguages.Concat(StreamingSpeechModel.Correction.Languages).Distinct().ToArray()
         : AvailableSourceLanguages;
     internal string[] AvailableTargetLanguages => TargetLanguagesFor(SelectedSourceLanguage);
@@ -69,11 +73,10 @@ public sealed class TranslationOptions
     {
         if (SelectedTranslationModel.Length == 0) return [];
         bool limitToHubs = UseLmtTranslation && source is not ("auto" or "Chinese" or "English");
-        var available = MultiSpeaker ? Languages.Select(language => language.Id) : SessionSourceLanguages;
-        return available.Where(id => Languages.Any(language => language.Id == id) &&
+        return SessionSourceLanguages.Where(id => Languages.Any(language => language.Id == id) &&
             (!limitToHubs || id is "Chinese" or "English")).ToArray();
     }
-    internal bool CanTranslateTwoWay => SelectedTranslationModel.Length != 0 && (MultiSpeaker ? SelectedMossModel.Length != 0 : ModelForSource("auto") is not null);
+    internal bool CanTranslateTwoWay => SelectedTranslationModel.Length != 0 && ModelForSource("auto") is not null;
     internal string SelectedSourceLanguage => TwoWay ? "auto" : SelectLanguage(SourceLanguage, SessionSourceLanguages);
     internal string SelectedTargetLanguage => SelectLanguage(TargetLanguage, AvailableTargetLanguages, "English");
 

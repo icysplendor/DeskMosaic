@@ -9,18 +9,18 @@ namespace WinAssistant.Translation;
 
 internal static class StreamingRecognition
 {
-    internal static async Task RunFileAsync(TranslationOptions options, StreamingSpeechModel? speechModel, string archive,
+    internal static async Task RunFileAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive,
         string audioFile, Action ready, Action<TranslationCaption> caption, CancellationToken token)
     {
         const int rate = 16_000;
         string executable = BundledTranslationRuntime.Resolve(null, "streaming", "streaming-asr.exe");
-        var (model, helperArguments) = await PrepareRecognition(options, speechModel, archive, executable, token, _ => { }, imported: true);
+        string model = await PrepareModel(speechModel, archive, token, _ => { });
+        var helperArguments = await RecognitionArguments(options, model, token);
         string encoder = WinAssistant.Screenshot.RegionRecording.FindEncoder();
         using var helper = Start(executable, model, true, helperArguments, environment: new()
         {
             ["ASSISTANT_FILE_TRANSCRIPTION"] = "1",
-            ["ASSISTANT_MIC_VAD"] = "off",
-            ["ASSISTANT_MOSS_MODEL"] = options.MultiSpeaker ? options.SelectedMossModel : null
+            ["ASSISTANT_MIC_VAD"] = "off"
         });
         using var terminateHelper = token.Register(() => Kill(helper));
         try
@@ -68,12 +68,9 @@ internal static class StreamingRecognition
                     await diagnostics;
                     if (!receivedAudio || decoder.ExitCode != 0)
                         throw new IOException("无法读取选定的音频文件。 / Could not read the selected audio file.");
-                    if (!options.MultiSpeaker)
-                    {
-                        // Supply right context and finalize the last spoken paragraph.
-                        Array.Clear(packet, 12, packet.Length - 12);
-                        for (int index = 0; index < 8; index++) await Send(packet, packet.Length - 12);
-                    }
+                    // Supply right context and finalize the last spoken paragraph.
+                    Array.Clear(packet, 12, packet.Length - 12);
+                    for (int index = 0; index < 8; index++) await Send(packet, packet.Length - 12);
                 }
                 finally { Kill(decoder); }
 
@@ -89,14 +86,12 @@ internal static class StreamingRecognition
                 while (await helper.StandardOutput.ReadLineAsync(token) is { } line)
                 {
                     var fields = line.Split('\t', 6);
-                    if (fields.Length != 6 || fields[0] != "0" ||
-                        (fields[1] != "1" && (!options.MultiSpeaker || !fields[1].StartsWith('M'))) ||
+                    if (fields.Length != 6 || fields[0] != "0" || fields[1] != "1" ||
                         !int.TryParse(fields[2], out int speakerId) ||
                         !long.TryParse(fields[3], out long start) || !long.TryParse(fields[4], out long end) ||
                         !fields[5].Any(char.IsLetterOrDigit)) continue;
-                    int batch = options.MultiSpeaker && int.TryParse(fields[1].AsSpan(1), out int parsed) ? parsed : 0;
                     var paragraph = new TranslationCaption(++paragraphCount, false, fields[5], null,
-                        TranslationFinal: false, SpeakerId: speakerId, StartMs: start, EndMs: end, SpeakerBatch: batch);
+                        TranslationFinal: false, SpeakerId: speakerId, StartMs: start, EndMs: end);
                     caption(paragraph);
                 }
                 await helper.WaitForExitAsync(token);
@@ -105,7 +100,7 @@ internal static class StreamingRecognition
         finally { Kill(helper); }
     }
 
-    internal static async Task RunAsync(TranslationOptions options, StreamingSpeechModel? speechModel, string archive, Action capturing, Action ready, Func<Task>? translationReady,
+    internal static async Task RunAsync(TranslationOptions options, StreamingSpeechModel speechModel, string archive, Action capturing, Action ready, Func<Task>? translationReady,
         Action<TranslationCaption> caption, Func<string, bool, Action<string>, CancellationToken, Task<TranslationResult>>? translate,
         CancellationToken token, Action<string>? recordingSaved, Action<string> Log, CancellationToken finishInput)
     {
@@ -114,9 +109,13 @@ internal static class StreamingRecognition
         using var captureLifetime = CancellationTokenSource.CreateLinkedTokenSource(active, finishInput);
         var correction = StreamingSpeechModel.Correction;
         string correctionArchive = options.SelectedCorrectionModel;
-        bool correctParagraphs = !options.MultiSpeaker && options.EnableCorrection && correctionArchive.Length != 0 &&
+        string mossPath = options.UsesMossReview ? options.SelectedMossModel : "";
+        bool mossReview = options.EnableCorrection && mossPath.Length != 0;
+        bool correctParagraphs = !options.UsesMossReview && options.EnableCorrection && correctionArchive.Length != 0 &&
             correction.Languages.Contains(options.SelectedSourceLanguage);
-        Log($"review_configuration enabled={options.EnableCorrection} archive_found={correctionArchive.Length != 0} eligible={correctParagraphs}");
+        string reviewName = options.UsesMossReview ? "moss" : "x-asr";
+        string reviewPath = options.UsesMossReview ? mossPath : correctionArchive;
+        Log($"review_configuration model={reviewName} enabled={options.EnableCorrection} archive_found={reviewPath.Length != 0} eligible={correctParagraphs || mossReview}");
         var frames = new BufferedAudio<byte[]>();
         var signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
         var state = new object();
@@ -128,7 +127,6 @@ internal static class StreamingRecognition
         long firstEligible = Environment.TickCount64 - previewInterval;
         long[] lastRequest = [firstEligible, firstEligible];
         var captures = new List<Task>();
-        long captureClock = Environment.TickCount64;
         int captureStarted = 0;
         CancellationTokenSource? draftRequest = null;
         TranslationCaption? draftInput = null;
@@ -175,7 +173,8 @@ internal static class StreamingRecognition
         async Task RunRecognition()
         {
             string executable = await runtime.WaitAsync(active);
-            var (model, arguments) = await PrepareRecognition(options, speechModel, archive, executable, active, Log);
+            var model = await PrepareModel(speechModel, archive, active, Log);
+            string[] arguments = await RecognitionArguments(options, model, active);
             string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
             if (correctionDirectory is not null)
                 arguments = [.. arguments, "--correction", correctionDirectory];
@@ -184,7 +183,8 @@ internal static class StreamingRecognition
                 ["ASSISTANT_MIC_VAD"] = options.Microphone ? options.MicrophoneFilter : "off",
                 ["ASSISTANT_MIC_PAUSE"] = options.MicrophonePause,
                 ["ASSISTANT_MIC_VAD_MODEL"] = null,
-                ["ASSISTANT_MOSS_MODEL"] = options.MultiSpeaker ? options.SelectedMossModel : null
+                ["ASSISTANT_MOSS_REVIEW"] = mossReview ? options.Compute == "cpu" ? "cpu" : "auto" : null,
+                ["ASSISTANT_MOSS_MODEL"] = mossReview ? mossPath : null
             };
             string detector = Path.Combine(Path.GetDirectoryName(executable)!, "silero_vad.onnx");
             if (File.Exists(detector)) microphoneEnvironment["ASSISTANT_MIC_VAD_MODEL"] = detector;
@@ -196,15 +196,11 @@ internal static class StreamingRecognition
                 try
                 {
                     if (await helper.StandardOutput.ReadLineAsync(timeout.Token) != "ready")
-                        throw new InvalidOperationException(options.MultiSpeaker
-                            ? "多人识别启动失败。 / Multi-speaker recognition failed to start."
-                            : "流式识别启动失败。 / Streaming ASR failed to start.");
+                        throw new InvalidOperationException("中英流式识别启动失败。 / Streaming ASR failed to start.");
                 }
                 catch (OperationCanceledException) when (!active.IsCancellationRequested)
                 {
-                    throw new TimeoutException(options.MultiSpeaker
-                        ? "加载多人模型超时。 / Multi-speaker model load timed out."
-                        : "加载流式模型超时。 / Streaming ASR model load timed out.");
+                    throw new TimeoutException("加载中英流式模型超时。 / Streaming ASR model load timed out.");
                 }
             }
 
@@ -212,12 +208,10 @@ internal static class StreamingRecognition
             var replayBoundary = new byte[12];
             BinaryPrimitives.WriteUInt32LittleEndian(replayBoundary, uint.MaxValue);
             BinaryPrimitives.WriteUInt32LittleEndian(replayBoundary.AsSpan(4), 2);
-            if (!options.MultiSpeaker && !frames.TryAppend(replayBoundary, replayBoundary.Length))
+            if (!frames.TryAppend(replayBoundary, replayBoundary.Length) && !finishInput.IsCancellationRequested)
                 throw new InvalidOperationException("暂存音频已满，语音识别跟不上。 / The audio buffer is full; recognition could not keep up.");
             ready();
-            Task writing = WriteAudio(helper);
-            Task reading = Recognize(helper);
-            var workers = new List<Task> { writing, reading };
+            var workers = new List<Task> { WriteAudio(helper), Recognize(helper) };
             Task? correctionPreparation = correctParagraphs ? Task.Run(PrepareCorrection) : null;
             if (correctionPreparation is not null) workers.Add(correctionPreparation);
             if (translationReady is not null) workers.Add(Translate(translationReady));
@@ -268,18 +262,8 @@ internal static class StreamingRecognition
             long lastPacket = Environment.TickCount64;
             captures.Add(TranslationAudioCapture.Start(microphone, (samples, sampleRate) =>
             {
-                long now = Environment.TickCount64;
-                if (rate == 0 && options.MultiSpeaker && options.SystemAudio && options.Microphone)
-                {
-                    var marker = new byte[12];
-                    long firstSample = (now - captureClock) * 16 - samples.Length * 16000L / sampleRate;
-                    BinaryPrimitives.WriteUInt32LittleEndian(marker, uint.MaxValue - 1);
-                    BinaryPrimitives.WriteUInt32LittleEndian(marker.AsSpan(4), microphone ? 1u : 0u);
-                    BinaryPrimitives.WriteUInt32LittleEndian(marker.AsSpan(8), (uint)Math.Clamp(firstSample, 0, uint.MaxValue));
-                    QueueFrame(marker);
-                }
                 rate = sampleRate;
-                lastPacket = now;
+                lastPacket = Environment.TickCount64;
                 Enqueue(samples);
             }, () =>
             {
@@ -309,15 +293,10 @@ internal static class StreamingRecognition
                     header[2] = count;
                     Buffer.BlockCopy(samples, offset * sizeof(float), packet, 12, count * sizeof(float));
                     recording?.Append(packet);
-                    QueueFrame(packet);
+                    if (!frames.TryAppend(packet, packet.Length) && !active.IsCancellationRequested)
+                        throw new InvalidOperationException("暂存音频已满，语音识别跟不上。 / The audio buffer is full; recognition could not keep up.");
                 }
             }
-        }
-
-        void QueueFrame(byte[] packet)
-        {
-            if (!frames.TryAppend(packet, packet.Length) && !active.IsCancellationRequested)
-                throw new InvalidOperationException("暂存音频已满，语音识别跟不上。 / The audio buffer is full; recognition could not keep up.");
         }
 
         async Task WriteAudio(Process helper)
@@ -349,27 +328,13 @@ internal static class StreamingRecognition
                     startMs < 0 || endMs < startMs) continue;
                 int sourceIndex = fields[0] == "1" ? 1 : 0;
                 string kind = fields[1];
-                if (options.MultiSpeaker && kind.StartsWith('M') && int.TryParse(kind.AsSpan(1), out int batch))
-                {
-                    var text = fields[5].Trim();
-                    if (!text.Any(char.IsLetterOrDigit)) continue;
-                    lock (state)
-                    {
-                        var item = new TranslationCaption(++id, sourceIndex == 1, text, null,
-                            TranslationFinal: false, SpeakerId: speakerId, StartMs: startMs, EndMs: endMs,
-                            SpeakerBatch: batch, MixedAudio: options.SystemAudio && options.Microphone);
-                        caption(item);
-                        if (translationReady is not null) QueueFinal(item);
-                    }
-                    signal.Writer.TryWrite(true);
-                    continue;
-                }
                 int correctionId = 0;
-                bool correctionEvent = kind.Length > 1 && (kind[0] is 'F' or 'R' or 'E') &&
+                bool correctionEvent = kind.Length > 1 && (kind[0] is 'F' or 'R' or 'E' or 'G') &&
                     int.TryParse(kind.AsSpan(1), out correctionId);
                 var review = kind switch
                 {
                     "1" when !options.EnableCorrection => CaptionReview.Disabled,
+                    "1" when options.UsesMossReview => mossPath.Length == 0 ? CaptionReview.ModelMissing : CaptionReview.Unavailable,
                     "1" when !correction.Languages.Contains(options.SelectedSourceLanguage) => CaptionReview.LanguageUnsupported,
                     "1" when correctionArchive.Length == 0 => CaptionReview.ModelMissing,
                     "1" => CaptionReview.Unavailable,
@@ -389,13 +354,17 @@ internal static class StreamingRecognition
                     if (correctionEvent && kind[0] != 'F')
                     {
                         if (!pendingCorrections.Remove(correctionId, out var original)) continue;
-                        bool accepted = source.Any(char.IsLetterOrDigit);
+                        bool accepted = kind[0] == 'R' && source.Any(char.IsLetterOrDigit);
                         bool revised = accepted && source != original.Source;
                         var corrected = original with
                         {
                             Review = kind[0] == 'E' ? CaptionReview.ModelFailed :
                                 revised ? CaptionReview.Revised : CaptionReview.Kept
                         };
+                        if (kind[0] == 'G' && original.MossTurns(rawSource) is { Length: > 0 } turns)
+                            corrected = corrected with { Review = CaptionReview.MossReviewed, ReviewTurns = turns,
+                                StartMs = turns[0].StartMs, EndMs = turns.Max(turn => turn.EndMs),
+                                Translation = null, CacheHitPercent = null };
                         if (accepted)
                             corrected = corrected with { Source = source, StartMs = startMs, EndMs = endMs };
                         Log($"paragraph id={corrected.Id} range_ms={startMs}-{endMs} review={corrected.Review}");
@@ -441,13 +410,11 @@ internal static class StreamingRecognition
             {
                 await helper.WaitForExitAsync(active);
                 if (helper.ExitCode != 0)
-                    throw new InvalidOperationException("多人识别失败。 / Multi-speaker recognition failed.");
+                    throw new InvalidOperationException("流式识别未能完成。 / Streaming ASR did not finish successfully.");
                 lock (state) recognitionFinished = true;
                 signal.Writer.TryWrite(true);
                 return;
             }
-            if (options.MultiSpeaker)
-                throw new InvalidOperationException("多人识别已意外退出。 / Multi-speaker recognition exited unexpectedly.");
             throw new InvalidOperationException("中英流式识别已意外退出。 / Streaming ASR exited unexpectedly.");
         }
 
@@ -506,6 +473,20 @@ internal static class StreamingRecognition
                 }
                 if (final is not null)
                 {
+                    if (final.ReviewTurns.Length != 0)
+                    {
+                        var turns = new TranslationCaption[final.ReviewTurns.Length];
+                        for (int index = 0; index < turns.Length; index++)
+                        {
+                            var turn = final.ReviewTurns[index];
+                            var translated = await TranslateSafely(turn.Source, provisional: false, _ => { }, active);
+                            active.ThrowIfCancellationRequested();
+                            turns[index] = turn with { Translation = translated.Text, TranslationFinal = true };
+                        }
+                        lock (state) caption(final with { ReviewTurns = turns, TranslationFinal = true,
+                            Translation = string.Join("\n", turns.Select(turn => turn.Translation).Where(text => !string.IsNullOrEmpty(text))) });
+                        continue;
+                    }
                     var result = await TranslateSafely(final.Source, provisional: false, _ => { }, active);
                     active.ThrowIfCancellationRequested();
                     // On failure the visible preview stays provisional.
@@ -679,20 +660,6 @@ internal static class StreamingRecognition
         finally { Directory.Delete(temporary, recursive: true); }
         log($"model={model.Id} installed");
         return installed;
-    }
-
-    private static async Task<(string Directory, string[] Arguments)> PrepareRecognition(TranslationOptions options,
-        StreamingSpeechModel? speechModel, string archive, string executable, CancellationToken token, Action<string> log,
-        bool imported = false)
-    {
-        if (options.MultiSpeaker)
-        {
-            int sources = imported ? 1 : (options.SystemAudio ? 1 : 0) + (options.Microphone ? 2 : 0);
-            return (Path.GetDirectoryName(executable)!, ["--moss", "-", "-", options.Compute == "cpu" ? "cpu" : "auto", sources.ToString()]);
-        }
-        if (speechModel is null) throw new InvalidOperationException("The streaming recognition model is missing.");
-        var directory = await PrepareModel(speechModel, archive, token, log);
-        return (directory, await RecognitionArguments(options, directory, token));
     }
 
     private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token)

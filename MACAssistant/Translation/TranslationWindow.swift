@@ -149,7 +149,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        identifiesSpeakers = options.multiSpeaker || !options.selectedSpeakerModel.isEmpty
+        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true
@@ -178,6 +178,10 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                 }
                 for index in captions.indices where captions[index].translation == nil {
                     captions[index].translation = ""
+                    for turn in captions[index].reviewTurns.indices where captions[index].reviewTurns[turn].translation == nil {
+                        captions[index].reviewTurns[turn].translation = ""
+                        captions[index].reviewTurns[turn].translationFinal = true
+                    }
                 }
             }
             let onSaved: ((URL) -> Void)? = record ? { self.savedRecording = $0 } : nil
@@ -229,8 +233,8 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         captions.removeAll()
     }
 
-    func scopedSpeakerName(batch: Int, speaker: Int) -> String {
-        "\(t("段", "Batch")) \(batch) · \(t("说话人", "Speaker")) \(speaker)"
+    func scopedSpeakerName(_ id: Int) -> String {
+        id > 0 ? t("本段说话人 \(id)", "Passage speaker \(id)") : t("说话人待确认", "Speaker unconfirmed")
     }
 
     func speakerName(_ id: Int) -> String {
@@ -250,14 +254,17 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func export(includeSource: Bool, includeTranslation: Bool) {
         var sections: [String] = []
-        for item in captions where item.sourceFinal {
+        let finalCaptions = captions.filter(\.sourceFinal).flatMap { item in
+            item.reviewTurns.isEmpty ? [(item, item.id)] : item.reviewTurns.map { ($0, item.id) }
+        }
+        for (item, paragraph) in finalCaptions {
             let source = includeSource ? item.source : ""
             let translation = includeTranslation && item.translationFinal ? item.translation ?? "" : ""
             guard !source.isEmpty || !translation.isEmpty else { continue }
 
             var heading = sourceLabel(item)
-            if let batch = item.speakerBatch, item.speakerID > 0 {
-                heading += " · " + scopedSpeakerName(batch: batch, speaker: item.speakerID)
+            if item.speakerWithinParagraph {
+                heading += " · " + t("段落 \(paragraph)", "Passage \(paragraph)") + " · " + scopedSpeakerName(item.speakerID)
             } else if item.speakerID > 0 {
                 let speakerID = "\(t("说话人", "Speaker")) \(item.speakerID)"
                 let speaker = speakerNames[item.speakerID].map {
@@ -313,7 +320,6 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func sourceLabel(_ item: TranslationCaption) -> String {
         if fileSession { return t("导入音频", "Imported audio") }
-        if item.mixedAudio { return t("混合音频", "Mixed audio") }
         return item.microphone ? t("麦克风", "Microphone") : t("电脑声音", "System audio")
     }
 
@@ -472,7 +478,7 @@ private struct TranslationWindowView: View {
             HStack(spacing: 6) {
                 languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
                                  available: controller.sessionOptions.sessionSourceLanguages)
-                    .disabled(controller.sessionOptions.multiSpeaker || controller.sessionOptions.sessionSourceLanguages.isEmpty)
+                    .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
                 Button { controller.swapLanguages() } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
@@ -498,18 +504,6 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running || controller.audioFile != nil)
-            Toggle(t("多人", "Multi-speaker"), isOn: Binding(
-                get: { settings.translationOptions.multiSpeaker },
-                set: { enabled in
-                    settings.translationBinding(\.multiSpeaker).wrappedValue = enabled
-                    if let file = controller.audioFile { controller.setAudioFile(file, reselected: true) }
-                }
-            ))
-            .help(t("用 MOSS 转写可能重叠的语音。双音源会合并识别。", "Use MOSS for overlapping speech. Both inputs are transcribed together."))
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .fixedSize()
-            .disabled(controller.running)
             sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .disabled(controller.fileCompleted)
                 .padding(.leading, 4)
@@ -549,9 +543,7 @@ private struct TranslationWindowView: View {
     private var twoWayHelp: String {
         if controller.transcribeOnly { return t("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation") }
         if !controller.sessionOptions.canTranslateTwoWay {
-            return controller.sessionOptions.multiSpeaker
-                ? t("需要 MOSS 多人模型和文本翻译模型", "Requires MOSS and a translation model")
-                : t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
+            return t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
         }
         return t("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
     }
@@ -665,9 +657,10 @@ private struct TranslationWindowView: View {
         switch review {
         case .pending: t("复核中", "Reviewing")
         case .kept: t("已复核 · 保留原文", "Reviewed · Original kept")
+        case .mossReviewed: t("MOSS 已复核", "Reviewed by MOSS")
         case .revised: t("已修正", "Revised")
         case .disabled: t("未复核 · 功能已关闭", "Not reviewed · Disabled")
-        case .modelMissing: t("未复核 · 缺少 1920 ms 模型", "Not reviewed · 1920 ms model missing")
+        case .modelMissing: t("未复核 · 缺少所选复核模型", "Not reviewed · Selected review model missing")
         case .languageUnsupported: t("未复核 · 源语言不支持", "Not reviewed · Unsupported source language")
         case .modelPreparing: t("未复核 · 模型正在准备", "Not reviewed · Model preparing")
         case .modelFailed: t("未复核 · 模型加载失败", "Not reviewed · Model failed to load")
@@ -680,6 +673,31 @@ private struct TranslationWindowView: View {
     }
 
     private func captionRow(_ caption: TranslationCaption, latest: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if caption.reviewTurns.isEmpty {
+                captionContent(caption)
+            } else {
+                Text(captionReviewLabel(.mossReviewed))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                ForEach(caption.reviewTurns) { turn in
+                    captionContent(turn)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(latest ? accent.opacity(dark ? 0.20 : 0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if latest { RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3) }
+        }
+        .overlay(alignment: .bottom) {
+            if !latest { Rectangle().fill(line).frame(height: 1) }
+        }
+    }
+
+    private func captionContent(_ caption: TranslationCaption) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             let translation = caption.translation ?? ""
             if controller.sourceOnlySession || !caption.translationFinal ||
@@ -699,12 +717,12 @@ private struct TranslationWindowView: View {
             }
             HStack(spacing: 8) {
                 Label(controller.sourceLabel(caption),
-                      systemImage: controller.fileSession || caption.mixedAudio ? "waveform" : caption.microphone ? "mic" : "speaker.wave.2")
+                      systemImage: controller.fileSession ? "waveform" : caption.microphone ? "mic" : "speaker.wave.2")
                     .foregroundStyle(.secondary)
-                if let batch = caption.speakerBatch, caption.speakerID > 0 {
-                    Text(controller.scopedSpeakerName(batch: batch, speaker: caption.speakerID))
+                if caption.speakerWithinParagraph {
+                    Text(controller.scopedSpeakerName(caption.speakerID))
                         .foregroundStyle(.secondary)
-                        .help(t("说话人编号仅在当前识别段内有效", "Speaker numbers apply within this transcription batch"))
+                        .help(t("说话人编号仅在本段复核内有效", "Speaker numbers apply within this reviewed passage"))
                 } else if caption.speakerID > 0 {
                     SpeakerNameView(controller: controller, speakerID: caption.speakerID,
                                     help: t("双击修改说话人姓名", "Double-click to rename the speaker"),
@@ -731,16 +749,6 @@ private struct TranslationWindowView: View {
                 }
             }
             .font(.system(size: 11))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .background(latest ? accent.opacity(dark ? 0.20 : 0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if latest { RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3) }
-        }
-        .overlay(alignment: .bottom) {
-            if !latest { Rectangle().fill(line).frame(height: 1) }
         }
     }
 
@@ -904,11 +912,17 @@ struct TranslationSettingsView: View {
                 ), url: correction.download.url, type: .data, model: correction.download)
                 Toggle(t("模型就绪时启用段末修正", "Enable second pass when installed"),
                        isOn: settings.translationBinding(\.enableCorrection))
-                file(t("多人模式 · MOSS 0.9B Q8", "Multiple speakers · MOSS 0.9B Q8"), path: Binding(
+                Picker(t("段末复核模型", "Second-pass model"), selection: settings.translationBinding(\.reviewModel)) {
+                    Text("X-ASR 1920 ms").tag("x-asr")
+                    Text("MOSS 0.9B Q8").tag("moss")
+                }
+                .frame(width: 290)
+                .disabled(!settings.translationOptions.enableCorrection)
+                file(t("段末复核 · MOSS 0.9B Q8", "Second pass · MOSS 0.9B Q8"), path: Binding(
                     get: { settings.translationOptions.selectedMossModel },
                     set: { settings.translationBinding(\.mossModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.moss.url, type: UTType(filenameExtension: "gguf"), model: .moss)
-                file(t("普通模式 · 流式说话人模型", "Standard mode · Streaming speaker model"), path: Binding(
+                file(t("流式说话人模型", "Streaming speaker model"), path: Binding(
                     get: { settings.translationOptions.selectedSpeakerModel },
                     set: { settings.translationBinding(\.onlineSpeakerModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.onlineSpeaker.url, type: UTType(filenameExtension: "gguf"), model: .onlineSpeaker)

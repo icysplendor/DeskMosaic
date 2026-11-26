@@ -11,10 +11,10 @@ struct TranslationOptions: Codable, Equatable {
     var previewIntervalMs = Self.defaultPreviewIntervalMs
     var correctionModel = ""
     var enableCorrection = true
+    var reviewModel = "x-asr"
+    var mossModel = ""
     var diagnosticsEnabled = false
     var onlineSpeakerModel = ""
-    var multiSpeaker = false
-    var mossModel = ""
     var llamaServer = ""
     var compute = "auto"
     var sourceLanguage = "Chinese"
@@ -33,9 +33,11 @@ struct TranslationOptions: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case streamingModel, additionalStreamingModels, translationModel, onlineSpeakerModel, llamaServer, compute, sourceLanguage, targetLanguage
         case lmtTranslationModel, useLmtTranslation, previewIntervalMs, correctionModel, enableCorrection, diagnosticsEnabled
-        case multiSpeaker, mossModel
+        case reviewModel, mossModel
         case microphone, microphoneFilter, microphonePause, systemAudio, recordAudio, showSource, sourceFontSize, targetFontSize
     }
+
+    private enum PreviousTranslationKeys: String, CodingKey { case multiSpeaker }
 
     init() {}
 
@@ -52,9 +54,11 @@ struct TranslationOptions: Codable, Equatable {
         correctionModel = try fields.decodeIfPresent(String.self, forKey: .correctionModel) ?? correctionModel
         enableCorrection = try fields.decodeIfPresent(Bool.self, forKey: .enableCorrection) ?? enableCorrection
         diagnosticsEnabled = try fields.decodeIfPresent(Bool.self, forKey: .diagnosticsEnabled) ?? diagnosticsEnabled
-        onlineSpeakerModel = try fields.decodeIfPresent(String.self, forKey: .onlineSpeakerModel) ?? onlineSpeakerModel
-        multiSpeaker = try fields.decodeIfPresent(Bool.self, forKey: .multiSpeaker) ?? multiSpeaker
         mossModel = try fields.decodeIfPresent(String.self, forKey: .mossModel) ?? mossModel
+        let previousMultiSpeaker = try decoder.container(keyedBy: PreviousTranslationKeys.self)
+        let wasMultiSpeaker = try previousMultiSpeaker.decodeIfPresent(Bool.self, forKey: .multiSpeaker) ?? false
+        reviewModel = (try fields.decodeIfPresent(String.self, forKey: .reviewModel)) ?? (wasMultiSpeaker ? "moss" : "x-asr")
+        onlineSpeakerModel = try fields.decodeIfPresent(String.self, forKey: .onlineSpeakerModel) ?? onlineSpeakerModel
         llamaServer = try fields.decodeIfPresent(String.self, forKey: .llamaServer) ?? llamaServer
         compute = try fields.decodeIfPresent(String.self, forKey: .compute) ?? compute
         // Older configurations used automatic source recognition.
@@ -87,12 +91,12 @@ struct TranslationOptions: Codable, Equatable {
     ]
 
     var availableSourceLanguages: [String] {
-        if multiSpeaker { return ["auto"] }
-        return StreamingSpeechModel.catalog.filter { !path(for: $0).isEmpty }.flatMap(\.languages)
+        StreamingSpeechModel.catalog.filter { !path(for: $0).isEmpty }.flatMap(\.languages)
     }
 
-    var selectedCorrectionModel: String { StreamingSpeechModel.correction.download.resolvePath(correctionModel) }
+    var usesMossReview: Bool { reviewModel == "moss" }
     var selectedMossModel: String { TranslationModelDownload.moss.resolvePath(mossModel) }
+    var selectedCorrectionModel: String { StreamingSpeechModel.correction.download.resolvePath(correctionModel) }
     var selectedSpeakerModel: String { TranslationModelDownload.onlineSpeaker.resolvePath(onlineSpeakerModel) }
     var standardTranslationPath: String { TranslationModelDownload.llama.resolvePath(translationModel) }
     var lmtTranslationPath: String { TranslationModelDownload.lmt.resolvePath(lmtTranslationModel) }
@@ -101,7 +105,7 @@ struct TranslationOptions: Codable, Equatable {
     var importedAudio = false
     var sessionSourceLanguages: [String] {
         let live = availableSourceLanguages
-        guard !multiSpeaker, importedAudio, !selectedCorrectionModel.isEmpty else { return live }
+        guard importedAudio, !selectedCorrectionModel.isEmpty else { return live }
         return live + StreamingSpeechModel.correction.languages.filter { !live.contains($0) }
     }
     var availableTargetLanguages: [String] { targetLanguages(for: selectedSourceLanguage) }
@@ -110,12 +114,11 @@ struct TranslationOptions: Codable, Equatable {
         guard !selectedTranslationModel.isEmpty else { return [] }
         let hubs = ["Chinese", "English"]
         let limitToHubs = useLmtTranslation && source != "auto" && !hubs.contains(source)
-        let available = multiSpeaker ? Self.languages.map(\.id) : sessionSourceLanguages
-        return available.filter { id in
+        return sessionSourceLanguages.filter { id in
             Self.languages.contains { $0.id == id } && (!limitToHubs || hubs.contains(id))
         }
     }
-    var canTranslateTwoWay: Bool { !selectedTranslationModel.isEmpty && (multiSpeaker ? !selectedMossModel.isEmpty : modelForSource("auto") != nil) }
+    var canTranslateTwoWay: Bool { !selectedTranslationModel.isEmpty && modelForSource("auto") != nil }
     var selectedSourceLanguage: String { twoWay ? "auto" : Self.selectLanguage(sourceLanguage, from: sessionSourceLanguages) }
     var selectedTargetLanguage: String { Self.selectLanguage(targetLanguage, from: availableTargetLanguages, fallback: "English") }
 
@@ -374,7 +377,7 @@ struct TranslationError: LocalizedError {
 }
 
 enum CaptionReview {
-    case pending, kept, revised, disabled, modelMissing, languageUnsupported
+    case pending, kept, revised, mossReviewed, disabled, modelMissing, languageUnsupported
     case modelPreparing, modelFailed, noReviewableText, audioUnaligned, outsideLimits, queueFull, unavailable
 }
 
@@ -390,8 +393,23 @@ struct TranslationCaption: Identifiable, Equatable {
     var endMs: Int64 = 0
     var review: CaptionReview?
     var cacheHitPercent: Int?
-    var speakerBatch: Int?
-    var mixedAudio = false
+    var reviewTurns: [TranslationCaption] = []
+    var speakerWithinParagraph = false
+
+    func mossTurns(_ payload: Substring) -> [TranslationCaption] {
+        var turns: [TranslationCaption] = []
+        for entry in payload.split(separator: "\u{1E}") {
+            let fields = entry.split(separator: "\u{1F}", maxSplits: 3, omittingEmptySubsequences: false)
+            guard fields.count == 4, let speaker = Int(fields[0]), let start = Int64(fields[1]),
+                  let end = Int64(fields[2]), start >= 0, end > start else { return [] }
+            let text = fields[3].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            turns.append(TranslationCaption(id: turns.count, microphone: microphone, source: text,
+                translation: nil, translationFinal: false, speakerID: speaker, startMs: start, endMs: end,
+                speakerWithinParagraph: true))
+        }
+        return turns.sorted { ($0.startMs, $0.id) < ($1.startMs, $1.id) }
+    }
 
     var timeRange: String { "\(Self.formatTime(startMs)) – \(Self.formatTime(endMs))" }
 
@@ -446,12 +464,7 @@ final class TranslationEngine {
             diagnostic?.write("preflight_no_audio_source")
             throw TranslationError("请选择音源。", "Select an audio source.")
         }
-        let model = options.multiSpeaker ? nil : options.modelForSource(options.selectedSourceLanguage)
-        if options.multiSpeaker && options.selectedMossModel.isEmpty {
-            throw TranslationError("请在录写/翻译设置中配置 MOSS 多人模型。",
-                                   "Configure the MOSS multi-speaker model in Transcribe / Translate settings.")
-        }
-        guard options.multiSpeaker || model != nil else {
+        guard let model = options.modelForSource(options.selectedSourceLanguage) else {
             diagnostic?.write("preflight_speech_model_missing")
             throw TranslationError("请在录写/翻译设置中下载或选择对应的流式语音模型。",
                                    "Install a streaming speech model in Transcribe / Translate settings.")
@@ -504,7 +517,7 @@ final class TranslationEngine {
                             translate: StreamingRecognition.Translate?) async throws {
             if let audioFile {
                 guard let translationReady, let translate else {
-                    try await recognition.runFile(options: options, model: model, archive: model.map { options.path(for: $0) } ?? "", file: audioFile,
+                    try await recognition.runFile(options: options, model: model, archive: options.path(for: model), file: audioFile,
                                                   ready: { status(nil) }, caption: caption, diagnostic: diagnostic)
                     return
                 }
@@ -512,7 +525,7 @@ final class TranslationEngine {
                 captureStarted()
                 let transcription = Task {
                     do {
-                        try await recognition.runFile(options: options, model: model, archive: model.map { options.path(for: $0) } ?? "",
+                        try await recognition.runFile(options: options, model: model, archive: options.path(for: model),
                             file: audioFile, ready: { status(nil) }, caption: { paragraph in
                                 caption(paragraph)
                                 output.yield(paragraph)
@@ -546,7 +559,7 @@ final class TranslationEngine {
             }
             var sessionError: Error?
             do {
-                try await recognition.run(options: options, model: model, archive: model.map { options.path(for: $0) } ?? "",
+                try await recognition.run(options: options, model: model, archive: options.path(for: model),
                                           record: recordingSaved != nil, capturing: captureStarted, ready: { status(nil) },
                                           translationReady: translationReady, caption: caption, translate: translate, diagnostic: diagnostic)
             } catch { sessionError = error }

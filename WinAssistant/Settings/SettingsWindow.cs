@@ -1106,12 +1106,19 @@ internal sealed class SettingsWindow : Window
         var correction = StreamingSpeechModel.Correction;
         AddFile(T(correction.Chinese, correction.English), options.SelectedCorrectionModel, "X-ASR (*.tar.bz2)|*.tar.bz2",
             correction.Download.Url, value => Save(item => item.CorrectionModel = value), model: correction.Download);
-        AddChoice(T("中英段末修正", "Chinese/English second pass"),
+        AddChoice(T("段末复核", "Second pass"),
             [("on", T("模型就绪时启用", "On when installed")), ("off", T("关闭", "Off"))],
             options.EnableCorrection ? "on" : "off", value => Save(item => item.EnableCorrection = value == "on"));
-        AddFile(T("多人模式 · MOSS 0.9B Q8", "Multiple speakers · MOSS 0.9B Q8"), options.SelectedMossModel, "GGUF (*.gguf)|*.gguf",
+        AddChoice(T("段末复核模型", "Second-pass model"),
+            [("x-asr", "X-ASR 1920 ms"), ("moss", "MOSS 0.9B Q8")],
+            options.UsesMossReview ? "moss" : "x-asr", value => Save(item =>
+            {
+                item.ReviewModel = value;
+                item.MultiSpeaker = false;
+            }));
+        AddFile(T("段末复核 · MOSS 0.9B Q8", "Second pass · MOSS 0.9B Q8"), options.SelectedMossModel, "GGUF (*.gguf)|*.gguf",
             TranslationModelDownload.Moss.Url, value => Save(item => item.MossModel = value), model: TranslationModelDownload.Moss);
-        AddFile(T("普通模式 · 流式说话人模型", "Standard mode · Streaming speaker model"), options.SelectedSpeakerModel, "GGUF (*.gguf)|*.gguf",
+        AddFile(T("流式说话人模型", "Streaming speaker model"), options.SelectedSpeakerModel, "GGUF (*.gguf)|*.gguf",
             TranslationModelDownload.OnlineSpeaker.Url, value => Save(item => item.OnlineSpeakerModel = value), model: TranslationModelDownload.OnlineSpeaker);
 
         BeginSection(T("文本翻译", "Text translation"));

@@ -25,6 +25,7 @@ typedef struct {
   uint32_t rate;
   size_t count;
   CaptionRange range;
+  double audio_start;
   char original[CorrectionTextBytes];
   float samples[];
 } CorrectionJob;
@@ -44,6 +45,8 @@ typedef struct {
   ONLINE_CORRECTION_API(GetOnlineStreamResult);
   ONLINE_CORRECTION_API(DestroyOnlineRecognizerResult);
   const char *directory;
+  NativeLibrary sherpa;
+  int moss, cpu;
   DiarMutex lock;
   DiarCondition event;
   DiarThread worker;
@@ -165,6 +168,43 @@ static void correction_diagnostic(const char *stage) {
   fflush(stdout);
 }
 
+// One line replaces the parent caption atomically. ASCII separators are
+// reserved for the turn metadata and stripped from model-generated text.
+static void correction_publish_moss(MossReview *review, const CorrectionJob *job) {
+  int ok = moss_review_decode(review, job->samples, (uint32_t)job->count, job->rate);
+  if (!ok) {
+    correction_diagnostic("moss_inference_failed");
+    emit_caption(job->source, 'R', job->id, job->speaker, job->range, "", 0);
+    return;
+  }
+  char payload[32768];
+  size_t used = 0;
+  long long base = llround(job->audio_start * 1000);
+  long long duration = llround(job->count * 1000.0 / job->rate);
+  int turns = review->api.n_segments(review->session);
+  for (int i = 0; i < turns; ++i) {
+    struct transcribe_segment segment;
+    review->api.segment_init(&segment);
+    if (review->api.get_segment(review->session, i, &segment) != TRANSCRIBE_OK ||
+        !segment.text || !*segment.text) continue;
+    long long start = (long long)fmin(duration, fmax(0, segment.t0_ms));
+    long long end = (long long)fmin(duration, fmax(start, segment.t1_ms));
+    if (end <= start) continue;
+    int header = snprintf(payload + used, sizeof(payload) - used, "%s%d\x1f%lld\x1f%lld\x1f",
+                          used ? "\x1e" : "", segment.speaker_id, base + start, base + end);
+    size_t length = strlen(segment.text);
+    if (header < 0 || (size_t)header >= sizeof(payload) - used ||
+        length >= sizeof(payload) - used - (size_t)header) {
+      used = 0;
+      break;
+    }
+    used += (size_t)header;
+    for (size_t j = 0; j < length; ++j)
+      payload[used++] = (unsigned char)segment.text[j] < 32 ? ' ' : segment.text[j];
+  }
+  emit_caption(job->source, used ? 'G' : 'R', job->id, job->speaker, job->range, used ? payload : "", used);
+}
+
 static DIAR_WORKER correction_worker(void *context) {
   CaptionCorrection *correction = context;
 #ifdef _WIN32
@@ -180,7 +220,7 @@ static DIAR_WORKER correction_worker(void *context) {
 
   char encoder[CorrectionPathBytes], decoder[CorrectionPathBytes],
        joiner[CorrectionPathBytes], tokens[CorrectionPathBytes];
-  const char *directory = correction->directory;
+  const char *directory = correction->directory ? correction->directory : "";
   snprintf(encoder, sizeof(encoder), "%s" CorrectionPathSeparator "encoder.int8.onnx", directory);
   snprintf(decoder, sizeof(decoder), "%s" CorrectionPathSeparator "decoder.onnx", directory);
   snprintf(joiner, sizeof(joiner), "%s" CorrectionPathSeparator "joiner.int8.onnx", directory);
@@ -196,18 +236,28 @@ static DIAR_WORKER correction_worker(void *context) {
   config.model_config.provider = "cpu";
   config.decoding_method = "greedy_search";
   if (load) correction_diagnostic("engine_loading");
-  const SherpaOnnxOnlineRecognizer *recognizer = load ? correction->CreateOnlineRecognizer(&config) : NULL;
+  MossReview moss = {0};
+  int moss_ready = load && correction->moss && moss_review_open(&moss, correction->sherpa, correction->cpu);
+  const SherpaOnnxOnlineRecognizer *recognizer = load && !correction->moss ? correction->CreateOnlineRecognizer(&config) : NULL;
+  int ready = recognizer || moss_ready;
   diar_lock(&correction->lock);
-  correction->state = recognizer ? CorrectionReady : CorrectionUnavailable;
-  if (load) correction_diagnostic(recognizer ? "engine_ready" : "engine_load_failed");
+  correction->state = ready ? CorrectionReady : CorrectionUnavailable;
+  if (load) correction_diagnostic(ready ? "engine_ready" : "engine_load_failed");
   for (;;) {
-    while (recognizer && !correction->queued && !correction->stopping)
+    while (ready && !correction->queued && !correction->stopping)
       diar_wait(&correction->event, &correction->lock);
     if (!correction->queued) break;
     CorrectionJob *job = correction->jobs[correction->head];
     correction->head = (correction->head + 1) % CorrectionQueueSize;
     --correction->queued;
     diar_unlock(&correction->lock);
+    if (moss_ready) {
+      correction_publish_moss(&moss, job);
+      fflush(stdout);
+      free(job);
+      diar_lock(&correction->lock);
+      continue;
+    }
     const SherpaOnnxOnlineStream *stream = recognizer ? correction->CreateOnlineStream(recognizer) : NULL;
     const SherpaOnnxOnlineRecognizerResult *result = NULL;
     if (stream) {
@@ -239,6 +289,7 @@ static DIAR_WORKER correction_worker(void *context) {
   }
   diar_unlock(&correction->lock);
   if (recognizer) correction->DestroyOnlineRecognizer(recognizer);
+  if (moss_ready) moss.api.session_free(moss.session);
 #ifdef _WIN32
   return 0;
 #else
@@ -360,7 +411,7 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
                             const char *text, size_t length, CaptionRange range, CaptionRange audio_range, int isolated) {
   double begin = audio_range.start, end = audio_range.end;
   if (!correction->started) return CorrectionModelFailed;
-  if (!reviewable_text(text, length)) return CorrectionNoReviewableText;
+  if (!correction->moss && !reviewable_text(text, length)) return CorrectionNoReviewableText;
   if (end <= begin) return CorrectionAudioUnaligned;
   if (length >= CorrectionTextBytes || end - begin > CorrectionMaxSeconds || end - begin < 0.6)
     return CorrectionOutsideLimits;
@@ -392,6 +443,7 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
   job->count = count;
   job->rate = audio->rate;
   job->range = range;
+  job->audio_start = audio->origin + offset / (double)audio->rate;
   memcpy(job->original, text, length);
   job->original[length] = 0;
   correction->jobs[(correction->head + correction->queued) % CorrectionQueueSize] = job;

@@ -35,7 +35,6 @@ internal sealed class TranslationWindow : Window
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
-    private readonly CheckBox multiSpeaker = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox showSource = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox audioSource = new() { MinWidth = 132, VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox sourceLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
@@ -46,7 +45,7 @@ internal sealed class TranslationWindow : Window
     private readonly ComboBox translationSize = new() { Width = 53 };
     private readonly Button export = new() { IsEnabled = false };
     private readonly List<TranslationCaption> transcript = new();
-    private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review, TextBlock Cache)> visibleRows = new();
+    private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review, TextBlock Cache, StackPanel Turns)> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
     private CancellationTokenSource? session;
     private CancellationTokenSource? finishInput;
@@ -214,16 +213,6 @@ internal sealed class TranslationWindow : Window
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
         languages.Children.Add(recordAudio);
-        multiSpeaker.Foreground = Foreground;
-        multiSpeaker.Content = T("多人", "Multi-speaker");
-        multiSpeaker.ToolTip = T("用 MOSS 转写可能重叠的语音。双音源会合并识别。",
-            "Use MOSS for overlapping speech. Both inputs are transcribed together.");
-        multiSpeaker.Click += (_, _) =>
-        {
-            ConfigurationStore.Shared.Update(config => config.Translation.MultiSpeaker = multiSpeaker.IsChecked == true);
-            SetAudioFile(audioFile, reselected: true);
-        };
-        languages.Children.Add(multiSpeaker);
         start.Margin = new Thickness(10, 0, 0, 0);
         twoWay.Margin = new Thickness(8, 0, 0, 0);
         languages.Children.Add(start);
@@ -327,12 +316,9 @@ internal sealed class TranslationWindow : Window
 
     private void UpdateLanguageControls()
     {
-        var options = SessionOptions();
-        sourceLanguage.IsEnabled = session is null && !options.MultiSpeaker && sourceLanguage.Items.Count != 0;
+        sourceLanguage.IsEnabled = session is null && sourceLanguage.Items.Count != 0;
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
-        multiSpeaker.IsEnabled = session is null;
-        multiSpeaker.IsChecked = ConfigurationStore.Shared.Configuration.Translation.MultiSpeaker;
         recordAudio.IsEnabled = session is null && audioFile is null;
         recordAudio.IsChecked = audioFile is null && ConfigurationStore.Shared.Configuration.Translation.RecordAudio;
         recordAudio.ToolTip = audioFile is null
@@ -340,13 +326,13 @@ internal sealed class TranslationWindow : Window
             : T("导入音频时无法录音", "Recording is unavailable for imported audio");
         fileNotice.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
+        var options = SessionOptions();
         bool twoWayReady = options.CanTranslateTwoWay;
         twoWay.Visibility = session is null && !fileCompleted ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
         twoWay.ToolTip = !translating
             ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
-                : options.MultiSpeaker ? T("需要 MOSS 多人模型和文本翻译模型", "Requires MOSS and a translation model")
                 : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
         start.IsEnabled = !fileCompleted;
         start.Content = fileCompleted ? T("音频执行完毕", "Audio processing complete")
@@ -496,12 +482,13 @@ internal sealed class TranslationWindow : Window
         audioSource.IsEnabled = compute.IsEnabled = false;
         UpdateLanguageControls();
         var options = ConfigurationStore.Shared.Configuration.Translation.Copy();
-        using var input = options.MultiSpeaker && file is null ? new CancellationTokenSource() : null;
+        using var input = options.EnableCorrection && options.UsesMossReview &&
+            options.SelectedMossModel.Length != 0 && file is null ? new CancellationTokenSource() : null;
         finishInput = input;
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = options.MultiSpeaker || options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;
@@ -550,7 +537,9 @@ internal sealed class TranslationWindow : Window
                 foreach (var item in transcript.Where(item => !item.SourceFinal).ToArray())
                     ApplyCaption(item with { SourceFinal = true });
             foreach (var item in transcript.Where(item => item.Translation is null).ToArray())
-                ApplyCaption(item with { Translation = "" });
+                ApplyCaption(item.ReviewTurns.Length == 0 ? item with { Translation = "" }
+                    : item with { Translation = "", TranslationFinal = true,
+                        ReviewTurns = item.ReviewTurns.Select(turn => turn with { Translation = "", TranslationFinal = true }).ToArray() });
             fileCompleted = completed && !current.IsCancellationRequested;
             if (fileCompleted) result = T("音频处理完成", "Audio processing complete");
             if (savedRecording is not null && !failed) result = T("录音已保存", "Recording saved");
@@ -625,6 +614,8 @@ internal sealed class TranslationWindow : Window
             var card = new StackPanel();
             card.Children.Add(original);
             card.Children.Add(translation);
+            var turns = new StackPanel { Visibility = Visibility.Collapsed };
+            card.Children.Add(turns);
             card.Children.Add(attribution);
             if (latest is not null)
             {
@@ -639,7 +630,7 @@ internal sealed class TranslationWindow : Window
                 BorderThickness = new Thickness(3, 0, 0, 0), CornerRadius = new CornerRadius(6)
             };
             captions.Children.Add(latest);
-            visibleRows.Add(item.Id, (original, translation, speaker, time, review, cache));
+            visibleRows.Add(item.Id, (original, translation, speaker, time, review, cache, turns));
             if (captions.Children.Count > 250)
             {
                 captions.Children.RemoveAt(0);
@@ -655,17 +646,17 @@ internal sealed class TranslationWindow : Window
         export.IsEnabled |= item.SourceFinal;
         if (visibleRows.TryGetValue(item.Id, out var row))
         {
-            if (row.Speaker.IsReadOnly)
+            bool split = item.ReviewTurns.Length != 0;
+            if (split) row.Speaker.Visibility = Visibility.Collapsed;
+            else if (row.Speaker.IsReadOnly)
             {
-                row.Speaker.Tag = item.SpeakerBatch > 0 ? 0 : item.SpeakerId;
+                row.Speaker.Tag = item.SpeakerId;
                 bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0;
                 row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
-                row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed")
-                    : item.SpeakerBatch > 0 ? ScopedSpeakerName(item) : SpeakerName(item.SpeakerId);
-                row.Speaker.Cursor = unknown || item.SpeakerBatch > 0 ? Cursors.Arrow : Cursors.Hand;
-                row.Speaker.ToolTip = unknown ? T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably")
-                    : item.SpeakerBatch > 0 ? T("说话人编号仅在当前识别段内有效", "Speaker numbers apply within this transcription batch")
-                    : T("双击修改说话人姓名", "Double-click to rename the speaker");
+                row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
+                row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
+                if (unknown) row.Speaker.ToolTip = T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably");
+                else row.Speaker.ToolTip = T("双击修改说话人姓名", "Double-click to rename the speaker");
             }
             row.Time.Text = item.TimeRange;
             row.Review.Visibility = item.Review == CaptionReview.None ? Visibility.Collapsed : Visibility.Visible;
@@ -675,8 +666,9 @@ internal sealed class TranslationWindow : Window
                 CaptionReview.Pending => T("复核中", "Reviewing"),
                 CaptionReview.Kept => T("已复核 · 保留原文", "Reviewed · Original kept"),
                 CaptionReview.Revised => T("已修正", "Revised"),
+                CaptionReview.MossReviewed => T("MOSS 已复核", "Reviewed by MOSS"),
                 CaptionReview.Disabled => T("未复核 · 功能已关闭", "Not reviewed · Disabled"),
-                CaptionReview.ModelMissing => T("未复核 · 缺少 1920 ms 模型", "Not reviewed · 1920 ms model missing"),
+                CaptionReview.ModelMissing => T("未复核 · 缺少所选复核模型", "Not reviewed · Selected review model missing"),
                 CaptionReview.LanguageUnsupported => T("未复核 · 源语言不支持", "Not reviewed · Unsupported source language"),
                 CaptionReview.ModelPreparing => T("未复核 · 模型正在准备", "Not reviewed · Model preparing"),
                 CaptionReview.ModelFailed => T("未复核 · 模型加载失败", "Not reviewed · Model failed to load"),
@@ -691,7 +683,7 @@ internal sealed class TranslationWindow : Window
             row.Cache.Text = item.CacheHitPercent is int percent ? T($"缓存命中 {percent}%", $"Cache hit {percent}%") : "";
             row.Original.Text = item.Source;
             row.Original.Foreground = string.IsNullOrEmpty(item.Translation) ? Foreground : Muted;
-            row.Translation.Visibility = sourceOnlySession ? Visibility.Collapsed : Visibility.Visible;
+            row.Translation.Visibility = sourceOnlySession || split ? Visibility.Collapsed : Visibility.Visible;
             row.Translation.ToolTip = item.SourceFinal && item.TranslationFinal ? null : T("字幕更新中", "Caption may change");
             row.Translation.Text = item.Translation switch
             {
@@ -700,8 +692,9 @@ internal sealed class TranslationWindow : Window
                 _ => item.Translation
             };
             row.Translation.Foreground = string.IsNullOrEmpty(item.Translation) ? Muted : Foreground;
-            row.Original.Visibility = ShowOriginal(item, showSource.IsChecked == true)
+            row.Original.Visibility = !split && ShowOriginal(item, showSource.IsChecked == true)
                 ? Visibility.Visible : Visibility.Collapsed;
+            if (split) RenderReviewTurns(row.Turns, item, showSource.IsChecked == true);
         }
         if (follow) history.ScrollToEnd();
     }
@@ -782,9 +775,6 @@ internal sealed class TranslationWindow : Window
         clearedThroughCaption = transcript[^1].Id;
         ResetTranscript();
     }
-
-    private string ScopedSpeakerName(TranslationCaption item) =>
-        $"{T("段", "Batch")} {item.SpeakerBatch} · {T("说话人", "Speaker")} {item.SpeakerId}";
 
     private string SpeakerName(int id) =>
         speakerNames.GetValueOrDefault(id) ?? $"{T("说话人", "Speaker")} {id}";
@@ -869,8 +859,10 @@ internal sealed class TranslationWindow : Window
                 config.Translation.TargetFontSize = translation;
             });
         }
-        foreach (var row in visibleRows.Values)
+        foreach (var (id, row) in visibleRows)
         {
+            var item = transcript[id - clearedThroughCaption - 1];
+            if (item.ReviewTurns.Length != 0) RenderReviewTurns(row.Turns, item, showSource.IsChecked == true);
             row.Original.FontSize = original;
             row.Translation.FontSize = translation;
         }
@@ -881,12 +873,51 @@ internal sealed class TranslationWindow : Window
         foreach (var (id, row) in visibleRows)
         {
             var item = transcript[id - clearedThroughCaption - 1];
-            row.Original.Visibility = ShowOriginal(item, visible) ? Visibility.Visible : Visibility.Collapsed;
+            if (item.ReviewTurns.Length != 0) RenderReviewTurns(row.Turns, item, visible);
+            else row.Original.Visibility = ShowOriginal(item, visible) ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private string ScopedSpeakerName(int speaker) => speaker > 0
+        ? T($"本段说话人 {speaker}", $"Passage speaker {speaker}") : T("说话人待确认", "Speaker unconfirmed");
+
+    private void RenderReviewTurns(StackPanel panel, TranslationCaption item, bool showOriginal)
+    {
+        var options = ConfigurationStore.Shared.Configuration.Translation;
+        panel.Children.Clear();
+        panel.Visibility = Visibility.Visible;
+        foreach (var turn in item.ReviewTurns)
+        {
+            var label = new TextBlock
+            {
+                Text = $"{ScopedSpeakerName(turn.SpeakerId)} · {turn.TimeRange}", FontSize = 11, Foreground = Muted,
+                ToolTip = T("说话人编号仅在本段复核内有效", "Speaker numbers apply within this reviewed passage"),
+                Margin = new Thickness(0, 4, 0, 3), TextWrapping = TextWrapping.Wrap
+            };
+            Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
+            panel.Children.Add(label);
+            if (ShowOriginal(turn, showOriginal))
+                panel.Children.Add(new TextBlock
+                {
+                    Text = turn.Source, FontSize = options.SelectedSourceFontSize, TextWrapping = TextWrapping.Wrap,
+                    Foreground = string.IsNullOrEmpty(turn.Translation) ? Foreground : Muted
+                });
+            if (sourceOnlySession) continue;
+            panel.Children.Add(new TextBlock
+            {
+                Text = turn.Translation switch
+                {
+                    null when !item.TranslationFinal => T("正在翻译…", "Translating…"),
+                    null or "" => T("未生成译文", "Translation unavailable"),
+                    _ => turn.Translation
+                },
+                FontSize = options.SelectedTargetFontSize, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap,
+                Foreground = string.IsNullOrEmpty(turn.Translation) ? Muted : Foreground
+            });
         }
     }
 
     private string SourceLabel(TranslationCaption item) => fileSession ? T("导入音频", "Imported audio")
-        : item.MixedAudio ? T("混合音频", "Mixed audio")
         : item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio");
 
     private bool ShowOriginal(TranslationCaption item, bool keepSource) =>
@@ -916,17 +947,18 @@ internal sealed class TranslationWindow : Window
     private void Export(bool includeSource, bool includeTranslation)
     {
         var sections = new List<string>();
-        foreach (var item in transcript.Where(item => item.SourceFinal))
+        var finalCaptions = transcript.Where(item => item.SourceFinal).SelectMany(item => item.ReviewTurns.Length == 0
+            ? new[] { (Caption: item, Paragraph: item.Id) }
+            : item.ReviewTurns.Select(turn => (Caption: turn, Paragraph: item.Id)));
+        foreach (var (item, paragraph) in finalCaptions)
         {
             string source = includeSource ? item.Source : "";
             string translation = includeTranslation && item.TranslationFinal ? item.Translation ?? "" : "";
             if (source.Length == 0 && translation.Length == 0) continue;
 
             string heading = SourceLabel(item);
-            if (item.SpeakerBatch > 0 && item.SpeakerId > 0)
-            {
-                heading += " · " + ScopedSpeakerName(item);
-            }
+            if (item.SpeakerWithinParagraph)
+                heading += " · " + T($"段落 {paragraph}", $"Passage {paragraph}") + " · " + ScopedSpeakerName(item.SpeakerId);
             else if (item.SpeakerId > 0)
             {
                 string speakerId = $"{T("说话人", "Speaker")} {item.SpeakerId}";

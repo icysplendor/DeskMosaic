@@ -2,7 +2,7 @@
  * Output lines are source, event, speaker ID, start/end milliseconds, and UTF-8 text, separated by tabs.
  * 0[<bytes>] = draft with optional stable sentence prefix in UTF-8 bytes,
  * 1 = final, F<id> = final with a pending revision, R<id> = revision
- * (empty text retains the original).
+ * (empty text retains the original); G<id> carries reviewed speaker turns.
  * Pipes keep audio and recognition local to the parent process.
  */
 #include <math.h>
@@ -29,6 +29,7 @@ typedef void *NativeLibrary;
 #include "caption-timing.h"
 #include "wave-recorder.h"
 #include "online-diarization.h"
+#include "moss-asr.h"
 #include "caption-correction.h"
 #include "diarized-caption.h"
 #include "microphone-vad.h"
@@ -102,8 +103,6 @@ static MicrophoneVad load_microphone_vad(NativeLibrary library) {
   return microphone_vad;
 }
 
-#include "moss-asr.h"
-
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--help") == 0)
     return puts("streaming-asr THREADS LIBRARY [speaker.gguf DIAR_LIBRARY cpu|auto] [--correction MODEL_DIRECTORY]") < 0;
@@ -112,7 +111,6 @@ int main(int argc, char **argv) {
     correction_directory = argv[argc - 1];
     argc -= 2;
   }
-  int moss = argc == 6 && strcmp(argv[1], "--moss") == 0;
   int checking_vad = argc == 4 && strcmp(argv[1], "--check-vad") == 0;
   if (argc != 3 && argc != 6 && !checking_vad) return 2;
 #ifdef _WIN32
@@ -156,7 +154,6 @@ int main(int argc, char **argv) {
     return 2;
   }
   startup_diagnostic("speech_library_loaded");
-  if (moss) return run_moss(argv[3], library, strcmp(argv[4], "cpu") == 0, atoi(argv[5]));
   if (checking_vad) {
     MicrophoneVad vad = load_microphone_vad(library);
     microphone_vad_start(&vad, argv[3], 0.35f);
@@ -180,7 +177,11 @@ int main(int argc, char **argv) {
 
   LOAD(OnlineStreamInputFinished);
 
+  const char *moss_review = getenv("ASSISTANT_MOSS_REVIEW");
   CaptionCorrection correction = {
+      .moss = moss_review && *moss_review,
+      .cpu = moss_review && strcmp(moss_review, "cpu") == 0,
+      .sherpa = library,
       .directory = correction_directory,
       .CreateOnlineRecognizer = CreateOnlineRecognizer,
       .DestroyOnlineRecognizer = DestroyOnlineRecognizer,
@@ -252,10 +253,14 @@ int main(int argc, char **argv) {
   }
   double microphone_pause = mic_pause && strcmp(mic_pause, "long") == 0 ? 2.3 : 1.6;
 
-  if (correction.directory) correction_start(&correction);
+  if (correction.moss) {
+    correction.state = CorrectionLoading;
+    correction.preparationReported = 1;
+  }
   setvbuf(stdout, NULL, _IOLBF, 0);
   puts("ready");
   fflush(stdout);
+  if (correction.directory || correction.moss) correction_start(&correction);
   if (mic_mode && strcmp(mic_mode, "off") != 0)
     correction_diagnostic(microphone_vad.detector ? "microphone_vad_ready" : "microphone_vad_unavailable");
   if (correction.directory) correction_diagnostic(correction.started ? "engine_waiting_for_files" : "engine_thread_failed");
@@ -264,7 +269,28 @@ int main(int argc, char **argv) {
   float samples[32768];
   static const float tail_padding[8192] = {0};
   int status = 0;
-  while (fread(header, sizeof(uint32_t), 3, stdin) == 3) {
+  uint32_t last_rate[AudioSources] = {0};
+  unsigned tail_source = 0;
+  uint32_t tail_sent = 0;
+  for (;;) {
+    int padding = fread(header, sizeof(uint32_t), 3, stdin) != 3;
+    if (padding) {
+      // Graceful shutdown closes stdin. Finish active utterances before
+      // joining the MOSS review worker, without writing synthetic audio to WAV.
+      if (!correction.moss || !feof(stdin) || ferror(stdin)) break;
+      while (tail_source < AudioSources && tail_sent >= last_rate[tail_source] * 3) {
+        ++tail_source;
+        tail_sent = 0;
+      }
+      if (tail_source == AudioSources) break;
+      uint32_t remaining = last_rate[tail_source] * 3 - tail_sent;
+      uint32_t block = last_rate[tail_source] / 16;
+      header[0] = tail_source;
+      header[1] = last_rate[tail_source];
+      header[2] = remaining < block ? remaining : block;
+      tail_sent += header[2];
+      memset(samples, 0, header[2] * sizeof(float));
+    }
     uint32_t source = header[0], rate = header[1], count = header[2];
     // This marker follows every packet already queued when recognition became ready.
     if (source == UINT32_MAX && rate == 2 && count == 0) {
@@ -281,12 +307,13 @@ int main(int argc, char **argv) {
       continue;
     }
     if (source > 1 || rate < 8000 || rate > 384000 || count == 0 || count > sizeof(samples) / sizeof(samples[0]) ||
-        fread(samples, sizeof(float), count, stdin) != count) {
+        (!padding && fread(samples, sizeof(float), count, stdin) != count)) {
       puts("A\tinvalid_audio_packet");
       fflush(stdout);
       status = 5;
       break;
     }
+    last_rate[source] = rate;
     const SherpaOnnxOnlineStream *stream = streams[source];
     AudioActivity *audio = &activity[source];
     double packet_start = audio->received;
@@ -355,7 +382,7 @@ int main(int argc, char **argv) {
     DiarTimeline timeline = {0};
     if (online_speakers) timeline = diar_snapshot(&diar, source);
     double pause = use_microphone_vad ? microphone_pause : 1.6;
-    int silence_endpoint = (file_transcription || online_speakers || use_microphone_vad) && audio->quiet >= pause &&
+    int silence_endpoint = (file_transcription || online_speakers || use_microphone_vad || correction.moss) && audio->quiet >= pause &&
       (file_transcription || !online_speakers ||
        timeline.covered >= audio->received - audio->quiet + 0.32 || audio->quiet >= 3.0);
     if (silence_endpoint) {
