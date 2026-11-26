@@ -27,6 +27,8 @@ typedef struct {
   size_t count;
   CaptionRange range;
   double audio_start;
+  int session_speakers;
+  DiarTimeline timeline;
   char original[CorrectionTextBytes];
   float samples[];
 } CorrectionJob;
@@ -57,6 +59,7 @@ typedef struct {
   size_t head, queued;
   CorrectionJob *jobs[CorrectionQueueSize];
   CorrectionAudio audio[DiarSources];
+  DiarTimeline timeline[DiarSources];
 } CaptionCorrection;
 #undef ONLINE_CORRECTION_API
 
@@ -171,39 +174,98 @@ static void correction_diagnostic(const char *stage) {
 
 // One line replaces the parent caption atomically. ASCII separators are
 // reserved for the turn metadata and stripped from model-generated text.
-enum { MossReplyBytes = 32768 };
+enum { MossReplyBytes = 32768, MaxMossTurns = 128 };
+
+typedef struct {
+  int speaker;
+  long long start, end;
+  const char *text;
+} MossTurn;
+
+static int moss_session_speaker(const DiarTimeline *timeline, const MossTurn *turns, int count, int local) {
+  if (local <= 0) return 0;
+  enum { MaxSessionSpeakers = DiarSources * MaxDiarSpeakers };
+  double scores[MaxSessionSpeakers + 1] = {0}, duration = 0;
+  for (int i = 0; i < count; ++i) {
+    if (turns[i].speaker != local) continue;
+    double start = turns[i].start / 1000.0, end = turns[i].end / 1000.0;
+    duration += end - start;
+    for (size_t j = 0; j < timeline->count; ++j) {
+      double from = timeline->turns[j].start;
+      double to = j + 1 < timeline->count ? timeline->turns[j + 1].start : timeline->covered;
+      int speaker = timeline->turns[j].speaker;
+      if (speaker > 0 && speaker <= MaxSessionSpeakers)
+        scores[speaker] += fmax(0, fmin(end, to) - fmax(start, from));
+    }
+  }
+  int best = 0;
+  double second = 0;
+  for (int i = 1; i <= MaxSessionSpeakers; ++i) {
+    if (scores[i] > scores[best]) {
+      second = scores[best];
+      best = i;
+    } else second = fmax(second, scores[i]);
+  }
+  return scores[best] >= duration * 0.65 && scores[best] - second >= duration * 0.25 ? best : 0;
+}
+
+static void moss_session_speakers(const DiarTimeline *timeline, const MossTurn *turns, int count, int *speakers) {
+  int ambiguous[MaxMossTurns] = {0};
+  for (int i = 0; i < count; ++i)
+    speakers[i] = moss_session_speaker(timeline, turns, count, turns[i].speaker);
+  for (int i = 0; i < count; ++i) {
+    if (!speakers[i]) continue;
+    for (int j = i + 1; j < count; ++j) {
+      if (turns[i].speaker == turns[j].speaker || speakers[i] != speakers[j]) continue;
+      // The online timeline has a single foreground speaker. It cannot
+      // establish which of two overlapping MOSS voices owns the same ID.
+      if (fmin(turns[i].end, turns[j].end) - fmax(turns[i].start, turns[j].start) >= 200)
+        ambiguous[i] = ambiguous[j] = 1;
+    }
+  }
+  for (int i = 0; i < count; ++i) {
+    for (int j = 0; j < count; ++j) {
+      if (ambiguous[j] && turns[i].speaker == turns[j].speaker) { speakers[i] = 0; break; }
+    }
+  }
+}
 
 static int32_t correction_decode_moss(MossReview *review, const CorrectionJob *job, char *payload) {
   if (!moss_review_decode(review, job->samples, (uint32_t)job->count, job->rate)) return -1;
-  size_t used = 0;
   long long base = llround(job->audio_start * 1000);
   long long duration = llround(job->count * 1000.0 / job->rate);
-  int turns = review->api.n_segments(review->session);
+  int segments = review->api.n_segments(review->session);
   int short_audio = job->count / (double)job->rate < CorrectionShortSeconds;
-  if (short_audio && turns != 1) turns = 0;
-  for (int i = 0; i < turns; ++i) {
+  if (segments > MaxMossTurns || (short_audio && segments != 1)) return 0;
+  MossTurn turns[MaxMossTurns];
+  int count = 0;
+  for (int i = 0; i < segments; ++i) {
     struct transcribe_segment segment;
     review->api.segment_init(&segment);
     if (review->api.get_segment(review->session, i, &segment) != TRANSCRIBE_OK ||
         !segment.text || !*segment.text) continue;
-    // Very short audio can produce an unrelated word. Keep the streaming
-    // result when the second pass cannot corroborate the short utterance.
     if (short_audio && (!accepts_revision(job->original, segment.text) ||
         !preserves_edges(job->original, segment.text))) continue;
     long long start = (long long)fmin(duration, fmax(0, segment.t0_ms));
     long long end = (long long)fmin(duration, fmax(start, segment.t1_ms));
-    if (end <= start) continue;
+    if (end > start) turns[count++] = (MossTurn){segment.speaker_id, base + start, base + end, segment.text};
+  }
+
+  int session_ids[MaxMossTurns];
+  if (job->session_speakers) moss_session_speakers(&job->timeline, turns, count, session_ids);
+  size_t used = 0;
+  for (int i = 0; i < count; ++i) {
+    const MossTurn *turn = &turns[i];
+    // Negative labels distinguish session speakers from the IDs local to MOSS.
+    int speaker = job->session_speakers ? -session_ids[i] : turn->speaker;
     int header = snprintf(payload + used, MossReplyBytes - used, "%s%d\x1f%lld\x1f%lld\x1f",
-                          used ? "\x1e" : "", segment.speaker_id, base + start, base + end);
-    size_t length = strlen(segment.text);
+                          used ? "\x1e" : "", speaker, turn->start, turn->end);
+    size_t length = strlen(turn->text);
     if (header < 0 || (size_t)header >= MossReplyBytes - used ||
-        length >= MossReplyBytes - used - (size_t)header) {
-      used = 0;
-      break;
-    }
+        length >= MossReplyBytes - used - (size_t)header) return 0;
     used += (size_t)header;
     for (size_t j = 0; j < length; ++j)
-      payload[used++] = (unsigned char)segment.text[j] < 32 ? ' ' : segment.text[j];
+      payload[used++] = (unsigned char)turn->text[j] < 32 ? ' ' : turn->text[j];
   }
   return (int32_t)used;
 }
@@ -489,6 +551,8 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
   job->rate = audio->rate;
   job->range = range;
   job->audio_start = audio->origin + offset / (double)audio->rate;
+  job->session_speakers = correction->live_turns;
+  job->timeline = correction->timeline[source];
   memcpy(job->original, text, length);
   job->original[length] = 0;
   correction->jobs[(correction->head + correction->queued) % CorrectionQueueSize] = job;

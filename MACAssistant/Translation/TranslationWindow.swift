@@ -262,13 +262,13 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             var heading = sourceLabel(item)
             if item.speakerWithinParagraph {
                 heading += " · " + t("段落 \(paragraph)", "Passage \(paragraph)") + " · " + scopedSpeakerName(item.speakerID)
-            } else if item.speakerID > 0 {
+            } else if item.review != .pending && item.speakerID > 0 {
                 let speakerID = "\(t("说话人", "Speaker")) \(item.speakerID)"
                 let speaker = speakerNames[item.speakerID].map {
                     "\($0.components(separatedBy: .newlines).joined(separator: " ")) (\(speakerID))"
                 } ?? speakerID
                 heading += " · " + speaker
-            } else if identifiesSpeakers && item.turnSources.isEmpty {
+            } else if identifiesSpeakers && item.review != .pending && item.turnSources.isEmpty {
                 heading += " · " + t("说话人待确认", "Speaker unconfirmed")
             }
             heading += " · " + item.timeRange
@@ -328,6 +328,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 private struct TranslationWindowView: View {
     @ObservedObject var controller: TranslationWindowController
     @EnvironmentObject private var settings: SettingsManager
+    @State private var scrollPosition = CaptionScrollPosition()
     @State private var confirmingClear = false
 
     private enum AudioSource: Hashable {
@@ -418,16 +419,34 @@ private struct TranslationWindowView: View {
 
             ScrollViewReader { reader in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(displayedCaptions) { row in
-                            captionRow(row.caption, latest: row.id == latestCaptionID)
-                                .id(row.id)
+                    VStack(spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(displayedCaptions) { row in
+                                captionRow(row.caption, latest: row.id == latestCaptionID)
+                            }
                         }
+                        .padding(8)
+                        Color.clear.frame(height: 1).id("caption-bottom")
                     }
-                    .padding(8)
+                    .background {
+                        CaptionScrollObserver { atBottom in
+                            scrollPosition.following = atBottom
+                            if atBottom { scrollPosition.firstParagraph = nil }
+                            else if scrollPosition.firstParagraph == nil {
+                                scrollPosition.firstParagraph = controller.captions.suffix(250).first?.id
+                            }
+                        }
+                        .frame(width: 0, height: 0)
+                        .allowsHitTesting(false)
+                    }
                 }
-                .onChange(of: controller.captions.last) { _ in
-                    if let latestCaptionID { reader.scrollTo(latestCaptionID, anchor: .bottom) }
+                .onChange(of: controller.captions.last) { last in
+                    if last == nil {
+                        scrollPosition.following = true
+                        scrollPosition.firstParagraph = nil
+                    } else if scrollPosition.following {
+                        reader.scrollTo("caption-bottom", anchor: .bottom)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -717,7 +736,11 @@ private struct TranslationWindowView: View {
     }
 
     private var displayedCaptions: [DisplayedCaption] {
-        controller.captions.suffix(250).flatMap { paragraph in
+        let captions = controller.captions
+        let first = scrollPosition.firstParagraph.flatMap { id in
+            captions.firstIndex(where: { $0.id == id })
+        } ?? max(0, captions.count - 250)
+        return captions[first...].flatMap { paragraph in
             let rows = paragraph.reviewTurns.isEmpty ? [paragraph] : paragraph.reviewTurns
             return rows.enumerated().map { index, caption in
                 DisplayedCaption(id: .init(paragraph: paragraph.id, turn: index), caption: caption)
@@ -755,12 +778,12 @@ private struct TranslationWindowView: View {
                     Text(controller.scopedSpeakerName(caption.speakerID))
                         .foregroundStyle(.secondary)
                         .help(t("说话人编号仅在本段复核内有效", "Speaker numbers apply within this reviewed passage"))
-                } else if caption.speakerID > 0 {
+                } else if caption.sourceFinal && caption.review != .pending && caption.speakerID > 0 {
                     SpeakerNameView(controller: controller, speakerID: caption.speakerID,
                                     help: t("双击修改说话人姓名", "Double-click to rename the speaker"),
                                     editingLabel: t("编辑中", "Editing"))
                         .id(caption.speakerID)
-                } else if controller.identifiesSpeakers && caption.sourceFinal && caption.turnSources.isEmpty {
+                } else if controller.identifiesSpeakers && caption.sourceFinal && caption.review != .pending && caption.turnSources.isEmpty {
                     Text(t("说话人待确认", "Speaker unconfirmed"))
                         .foregroundStyle(.secondary)
                         .help(t("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably"))
@@ -796,6 +819,60 @@ private struct TranslationWindowView: View {
 
     private func t(_ chinese: String, _ english: String) -> String {
         settings.language == "en-US" ? english : chinese
+    }
+}
+
+private final class CaptionScrollPosition {
+    var following = true
+    var firstParagraph: Int?
+}
+
+private struct CaptionScrollObserver: NSViewRepresentable {
+    let didScroll: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView { ObserverView() }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.didScroll = didScroll
+        view.observeScrollView()
+    }
+
+    final class ObserverView: NSView {
+        var didScroll: ((Bool) -> Void)?
+        private weak var clipView: NSClipView?
+        private var lastOffset: CGFloat = 0
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observeScrollView()
+        }
+
+        func observeScrollView() {
+            let clip = enclosingScrollView?.contentView
+            guard clipView !== clip else { return }
+            if let clipView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clipView)
+            }
+            clipView = clip
+            if let clip {
+                lastOffset = clip.bounds.origin.y
+                clip.postsBoundsChangedNotifications = true
+                NotificationCenter.default.addObserver(self, selector: #selector(boundsChanged(_:)),
+                    name: NSView.boundsDidChangeNotification, object: clip)
+            }
+        }
+
+        @objc private func boundsChanged(_ notification: Notification) {
+            guard let clipView, let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            let offset = clipView.bounds.origin.y
+            guard offset != lastOffset else { return }
+            lastOffset = offset
+            let visible = scroll.documentVisibleRect
+            let distance = document.isFlipped ? document.bounds.maxY - visible.maxY : visible.minY - document.bounds.minY
+            didScroll?(distance <= 2)
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
     }
 }
 

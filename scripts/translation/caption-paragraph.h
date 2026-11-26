@@ -104,6 +104,14 @@ static size_t paragraph_boundary(const char *text, size_t stable) {
   return 0;
 }
 
+// Keep a possible next paragraph out of the visible draft until the
+// boundary is confirmed by the stable prefix. Its first words then arrive
+// after the preceding caption has been finalized.
+static size_t paragraph_preview_length(const char *text, size_t length) {
+  size_t boundary = paragraph_boundary(text, length);
+  return boundary ? boundary : length;
+}
+
 static const char *caption_separator(const char *previous, size_t length, const char *next) {
   if (!length || !*next || previous[length - 1] == ' ' || *next == ' ') return "";
   size_t last = length - 1, width;
@@ -116,6 +124,7 @@ static const char *caption_separator(const char *previous, size_t length, const 
 static size_t paragraph_stable(CaptionParagraph *state, const char *text, int endpoint) {
   size_t stable = 0;
   while (text[stable] && text[stable] == state->previous[stable]) ++stable;
+  while (stable && ((unsigned char)text[stable] & 0xc0) == 0x80) --stable;
   size_t length = strlen(text);
   size_t remembered = length < sizeof(state->previous) - 1 ? length : sizeof(state->previous) - 1;
   memcpy(state->previous, text, remembered);

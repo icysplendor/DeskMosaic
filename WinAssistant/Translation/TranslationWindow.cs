@@ -26,6 +26,7 @@ internal sealed class TranslationWindow : Window
     private readonly Border statusIndicator = new() { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock empty = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private Border? latest;
+    private (int Paragraph, int Turn, double RelativeY)? readingAnchor;
     private Brush Accent => (Brush)Resources["CaptionAccent"];
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
@@ -75,6 +76,10 @@ internal sealed class TranslationWindow : Window
         Topmost = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         history = new ScrollViewer { Content = captions, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        history.ScrollChanged += (_, args) =>
+        {
+            if (args.VerticalChange != 0 && args.ExtentHeightChange == 0) readingAnchor = null;
+        };
         start.Click += (_, _) => Toggle(twoWayMode: false);
         twoWay.Click += (_, _) => Toggle(twoWayMode: true);
         clear.Click += (_, _) => ConfirmClearTranscript();
@@ -608,7 +613,9 @@ internal sealed class TranslationWindow : Window
     {
         int index = item.Id - clearedThroughCaption - 1;
         if (index < 0 || index > transcript.Count) return;
-        bool follow = history.ScrollableHeight - history.VerticalOffset < 24;
+        bool follow = history.ScrollableHeight - history.VerticalOffset <= 2;
+        if (follow) readingAnchor = null;
+        else CaptureReadingAnchor();
         bool isNew = index == transcript.Count;
         if (isNew) transcript.Add(item);
         else transcript[index] = item;
@@ -624,11 +631,16 @@ internal sealed class TranslationWindow : Window
                 if (rows is not null) captions.Children.RemoveRange(position, rows.Length);
                 rows = items.Select(CreateCaptionRow).ToArray();
                 visibleRows[item.Id] = rows;
-                foreach (var row in rows) captions.Children.Insert(position++, row.Card);
+                for (int turn = 0; turn < rows.Length; turn++)
+                {
+                    rows[turn].Card.Tag = (item.Id, turn);
+                    captions.Children.Insert(position++, rows[turn].Card);
+                }
             }
             for (int turn = 0; turn < items.Length; turn++) UpdateCaptionRow(rows[turn], items[turn]);
 
-            if (visibleRows.Count > 250 && visibleRows.Remove(transcript[^251].Id, out var expired))
+            while (follow && visibleRows.Count > 250 && captions.Children[0] is Border first &&
+                   first.Tag is ValueTuple<int, int> entry && visibleRows.Remove(entry.Item1, out var expired))
                 captions.Children.RemoveRange(0, expired.Length);
 
             var last = visibleRows[transcript[^1].Id][^1].Card;
@@ -650,6 +662,30 @@ internal sealed class TranslationWindow : Window
         }
         export.IsEnabled |= item.SourceFinal;
         if (follow) history.ScrollToEnd();
+    }
+
+    private void CaptureReadingAnchor()
+    {
+        if (readingAnchor is not null || history.ViewportHeight <= 0) return;
+        double offset = history.VerticalOffset;
+        foreach (Border card in captions.Children)
+        {
+            double top = card.TranslatePoint(new Point(), captions).Y;
+            if (top + card.ActualHeight <= offset || card.Tag is not ValueTuple<int, int> entry) continue;
+            readingAnchor = (entry.Item1, entry.Item2, top - offset);
+            _ = Dispatcher.InvokeAsync(RestoreReadingAnchor, DispatcherPriority.Loaded);
+            break;
+        }
+    }
+
+    private void RestoreReadingAnchor()
+    {
+        var anchor = readingAnchor;
+        readingAnchor = null;
+        if (anchor is not { } saved || !visibleRows.TryGetValue(saved.Paragraph, out var rows)) return;
+        var card = rows[Math.Min(saved.Turn, rows.Length - 1)].Card;
+        double offset = card.TranslatePoint(new Point(), captions).Y - saved.RelativeY;
+        if (Math.Abs(offset - history.VerticalOffset) > 0.5) history.ScrollToVerticalOffset(offset);
     }
 
     private static TranslationCaption[] DisplayedRows(TranslationCaption item) =>
@@ -729,9 +765,10 @@ internal sealed class TranslationWindow : Window
         }
         else if (row.Speaker.IsReadOnly)
         {
-            row.Speaker.Tag = item.SpeakerId;
-            bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0 && item.TurnSources.Length == 0;
-            row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
+            bool show = item.SourceFinal && item.Review != CaptionReview.Pending;
+            row.Speaker.Tag = show ? item.SpeakerId : 0;
+            bool unknown = identifiesSpeakers && show && item.SpeakerId == 0 && item.TurnSources.Length == 0;
+            row.Speaker.Visibility = show && (item.SpeakerId > 0 || unknown) ? Visibility.Visible : Visibility.Collapsed;
             row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
             row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
             row.Speaker.ToolTip = unknown
@@ -783,6 +820,7 @@ internal sealed class TranslationWindow : Window
         visibleRows.Clear();
         clear.IsEnabled = export.IsEnabled = false;
         latest = null;
+        readingAnchor = null;
         empty.Text = speechReady && listening ? T("等待语音…", "Waiting for speech…") : status.Text;
         empty.Visibility = Visibility.Visible;
         history.ScrollToHome();
@@ -998,14 +1036,14 @@ internal sealed class TranslationWindow : Window
             string heading = SourceLabel(item);
             if (item.SpeakerWithinParagraph)
                 heading += " · " + T($"段落 {paragraph}", $"Passage {paragraph}") + " · " + ScopedSpeakerName(item.SpeakerId);
-            else if (item.SpeakerId > 0)
+            else if (item.Review != CaptionReview.Pending && item.SpeakerId > 0)
             {
                 string speakerId = $"{T("说话人", "Speaker")} {item.SpeakerId}";
                 string speaker = speakerNames.TryGetValue(item.SpeakerId, out var name)
                     ? $"{name.ReplaceLineEndings(" ")} ({speakerId})" : speakerId;
                 heading += " · " + speaker;
             }
-            else if (identifiesSpeakers && item.TurnSources.Length == 0)
+            else if (identifiesSpeakers && item.Review != CaptionReview.Pending && item.TurnSources.Length == 0)
             {
                 heading += " · " + T("说话人待确认", "Speaker unconfirmed");
             }

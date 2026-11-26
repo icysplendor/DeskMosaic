@@ -152,6 +152,7 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
                                      const SherpaOnnxOnlineRecognizerResult *result, int endpoint,
                                      double origin, const DiarTimeline *timeline, int flush,
                                      CaptionCorrection *correction, CaptionRange isolated_audio, double signal_end) {
+  if (correction->moss && correction->live_turns) correction->timeline[source] = *timeline;
   const char *text = result ? result->text : "";
   size_t length = strlen(text);
   size_t stable = paragraph_stable(&caption->acoustic, text, endpoint);
@@ -209,7 +210,8 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
   }
 
   // Never cut a readable paragraph through a short, still-unresolved tail.
-  size_t limit = flush ? total : scored;
+  size_t limit = flush ? total : correction->live_turns ? scored_limit : scored;
+  if (limit > total) limit = total;
   size_t cut;
   while (limit > start && (cut = paragraph_boundary(joined + start, limit - start)) != 0) {
     finalize_caption(correction, source, speaker, joined, start, start + cut, words, count, fallback, (CaptionRange){0});
@@ -266,11 +268,12 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
   }
   caption->speaker = speaker;
   if (start < total) {
-    size_t stable_end = scored_limit < total ? scored_limit : total;
+    size_t shown = correction->live_turns ? start + paragraph_preview_length(joined + start, total - start) : total;
+    size_t stable_end = scored_limit < shown ? scored_limit : shown;
     unsigned boundary = preview_sentence_boundary(joined + start, stable_end > start ? stable_end - start : 0);
-    if (correction->live_turns) speaker = emit_caption_turns(source, words, count, start, total);
-    emit_caption(source, '0', boundary, speaker, caption_range(words, count, start, total, fallback),
-                 joined + start, total - start);
+    if (correction->live_turns) speaker = emit_caption_turns(source, words, count, start, shown);
+    CaptionRange range = caption_range(words, count, start, shown, fallback);
+    emit_caption(source, '0', boundary, speaker, range, joined + start, shown - start);
   }
 }
 #endif

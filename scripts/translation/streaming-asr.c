@@ -445,9 +445,11 @@ int main(int argc, char **argv) {
                 ? (CaptionRange){audio->stream_origin, audio->last_signal + 0.20} : (CaptionRange){0};
               finalize_caption(&correction, source, 0, text, start, length, words, word_count, fallback, isolated_audio);
             } else if (!file_transcription) {
-              unsigned boundary = preview_sentence_boundary(text + start, stable > start ? stable - start : 0);
-              emit_caption(source, '0', boundary, 0, caption_range(words, word_count, start, length, fallback),
-                           text + start, length - start);
+              size_t shown = start + paragraph_preview_length(text + start, length - start);
+              size_t stable_end = stable < shown ? stable : shown;
+              unsigned boundary = preview_sentence_boundary(text + start, stable_end > start ? stable_end - start : 0);
+              emit_caption(source, '0', boundary, 0, caption_range(words, word_count, start, shown, fallback),
+                           text + start, shown - start);
             }
           }
         }

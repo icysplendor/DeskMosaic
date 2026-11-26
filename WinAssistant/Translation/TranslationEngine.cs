@@ -44,17 +44,20 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
         {
             string[] fields = entry.Split('\u001f', 4);
             if (fields.Length != 4 || !int.TryParse(fields[0], out int speaker) ||
-                !long.TryParse(fields[1], out long start) || !long.TryParse(fields[2], out long end) || start < 0 || end <= start)
+                !long.TryParse(fields[1], out long start) || !long.TryParse(fields[2], out long end) ||
+                speaker == int.MinValue || start < 0 || end <= start)
                 return [];
             string source = fields[3].Trim();
             if (source.Any(char.IsLetterOrDigit))
                 turns.Add(new TranslationCaption(turns.Count, Microphone, source, null, TranslationFinal: false,
-                    SpeakerId: speaker, StartMs: start, EndMs: end, Review: CaptionReview.MossReviewed) { SpeakerWithinParagraph = true });
+                    SpeakerId: Math.Abs(speaker), StartMs: start, EndMs: end, Review: CaptionReview.MossReviewed)
+                    { SpeakerWithinParagraph = speaker >= 0 });
         }
         var merged = new List<TranslationCaption>();
         foreach (var turn in turns.OrderBy(turn => turn.StartMs))
         {
-            if (merged.Count > 0 && turn.SpeakerId > 0 && merged[^1].SpeakerId == turn.SpeakerId)
+            if (merged.Count > 0 && turn.SpeakerId > 0 && merged[^1].SpeakerId == turn.SpeakerId &&
+                merged[^1].SpeakerWithinParagraph == turn.SpeakerWithinParagraph)
             {
                 var previous = merged[^1];
                 string separator = char.IsAscii(previous.Source[^1]) && char.IsAscii(turn.Source[0]) ? " " : "";

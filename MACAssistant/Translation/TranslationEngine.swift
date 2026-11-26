@@ -417,16 +417,17 @@ struct TranslationCaption: Identifiable, Equatable {
         for entry in payload.split(separator: "\u{1E}") {
             let fields = entry.split(separator: "\u{1F}", maxSplits: 3, omittingEmptySubsequences: false)
             guard fields.count == 4, let speaker = Int(fields[0]), let start = Int64(fields[1]),
-                  let end = Int64(fields[2]), start >= 0, end > start else { return [] }
+                  let end = Int64(fields[2]), speaker > Int.min, start >= 0, end > start else { return [] }
             let text = fields[3].trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
             turns.append(TranslationCaption(id: turns.count, microphone: microphone, source: text,
-                translation: nil, translationFinal: false, speakerID: speaker, startMs: start, endMs: end,
-                review: .mossReviewed, speakerWithinParagraph: true))
+                translation: nil, translationFinal: false, speakerID: abs(speaker), startMs: start, endMs: end,
+                review: .mossReviewed, speakerWithinParagraph: speaker >= 0))
         }
         var merged: [TranslationCaption] = []
         for turn in turns.sorted(by: { ($0.startMs, $0.id) < ($1.startMs, $1.id) }) {
-            if var previous = merged.last, turn.speakerID > 0, previous.speakerID == turn.speakerID {
+            if var previous = merged.last, turn.speakerID > 0, previous.speakerID == turn.speakerID,
+               previous.speakerWithinParagraph == turn.speakerWithinParagraph {
                 let separator = previous.source.last?.isASCII == true && turn.source.first?.isASCII == true ? " " : ""
                 previous.source += separator + turn.source
                 previous.endMs = max(previous.endMs, turn.endMs)
