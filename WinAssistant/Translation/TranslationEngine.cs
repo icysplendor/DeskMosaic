@@ -15,7 +15,7 @@ internal enum CaptionReview
     ModelPreparing, ModelFailed, NoReviewableText, AudioUnaligned, OutsideLimits, QueueFull, Unavailable
 }
 
-internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None, int? CacheHitPercent = null)
+internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None, int? CacheHitPercent = null, int SpeakerBatch = 0, bool MixedAudio = false)
 {
     internal string TimeRange => $"{FormatTime(StartMs)} – {FormatTime(EndMs)}";
 
@@ -32,27 +32,31 @@ internal sealed record TranslationResult(string Text, int? CacheHitPercent = nul
 internal sealed class TranslationEngine
 {
     internal async Task RunAsync(TranslationOptions options, Action capturing, Action<string?> status,
-        Action<TranslationCaption> caption, CancellationToken token, Action<string>? recordingSaved = null, string? audioFile = null)
+        Action<TranslationCaption> caption, CancellationToken token, Action<string>? recordingSaved = null, string? audioFile = null, CancellationToken finishInput = default)
     {
         options.ImportedAudio = audioFile is not null;
         if (audioFile is null && !options.SystemAudio && !options.Microphone)
             throw new InvalidOperationException("Select an audio source / 请选择音源。");
-        var model = options.ModelForSource(options.SelectedSourceLanguage)
-            ?? throw new InvalidOperationException("请在录写/翻译设置中下载或选择对应的流式语音模型。 / Install a streaming speech model in Transcribe / Translate settings.");
+        var model = options.MultiSpeaker ? null : options.ModelForSource(options.SelectedSourceLanguage);
+        if (options.MultiSpeaker && options.SelectedMossModel.Length == 0)
+            throw new InvalidOperationException("请在录写/翻译设置中配置 MOSS 多人模型。 / Configure the MOSS multi-speaker model in Transcribe / Translate settings.");
+        if (!options.MultiSpeaker && model is null)
+            throw new InvalidOperationException("请在录写/翻译设置中下载或选择对应的流式语音模型。 / Install a streaming speech model in Transcribe / Translate settings.");
+        string speechArchive = model is null ? "" : options.PathFor(model);
         string translationModel = options.TranscribeOnly ? "" : options.SelectedTranslationModel;
         if (!options.TranscribeOnly && translationModel.Length == 0)
             throw new InvalidOperationException("请在录写/翻译设置中下载或选择当前的文本翻译模型。 / Install the selected text translation model in Transcribe / Translate settings.");
         using var diagnostic = options.DiagnosticsEnabled ? OpenDiagnosticLog() : null;
-        Log($"session_started fast_model={model.Id} source_language={options.SelectedSourceLanguage}");
+        Log($"session_started fast_model={model?.Id ?? "moss"} source_language={options.SelectedSourceLanguage}");
         if (options.TranscribeOnly)
         {
             if (audioFile is not null)
             {
-                await StreamingRecognition.RunFileAsync(options, model, options.PathFor(model), audioFile, () => status(null), caption, token);
+                await StreamingRecognition.RunFileAsync(options, model, speechArchive, audioFile, () => status(null), caption, token);
                 return;
             }
-            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), capturing, () => status(null),
-                null, caption, null, token, recordingSaved, Log);
+            await StreamingRecognition.RunAsync(options, model, speechArchive, capturing, () => status(null),
+                null, caption, null, token, recordingSaved, Log, finishInput);
             return;
         }
 
@@ -99,7 +103,7 @@ internal sealed class TranslationEngine
                 {
                     try
                     {
-                        await StreamingRecognition.RunFileAsync(options, model, options.PathFor(model), audioFile, () => status(null),
+                        await StreamingRecognition.RunFileAsync(options, model, speechArchive, audioFile, () => status(null),
                             paragraph =>
                             {
                                 caption(paragraph);
@@ -110,7 +114,7 @@ internal sealed class TranslationEngine
                     catch (Exception error) { paragraphs.Writer.TryComplete(error); }
                 }
             }
-            await StreamingRecognition.RunAsync(options, model, options.PathFor(model), () =>
+            await StreamingRecognition.RunAsync(options, model, speechArchive, () =>
                 {
                     capturing();
                     captureReady.TrySetResult();
@@ -119,7 +123,7 @@ internal sealed class TranslationEngine
                 {
                     var server = await llamaStartup.WaitAsync(active);
                     status(server.Backend);
-                }, caption, TranslateText, active, recordingSaved, Log);
+                }, caption, TranslateText, active, recordingSaved, Log, finishInput);
         }
         finally
         {

@@ -8,8 +8,17 @@ final class StreamingRecognition {
     private var process: Process?
     private var fileDecoder: Process?
     private var recording: TranslationRecording?
+    private var finishCapture: (() -> Void)?
+
+    func finishLiveInput() -> Bool {
+        guard let finishCapture else { return false }
+        self.finishCapture = nil
+        finishCapture()
+        return true
+    }
 
     func stop() {
+        finishCapture = nil
         capture?.stop()
         capture = nil
         if let process, process.isRunning { process.terminate() }
@@ -26,10 +35,10 @@ final class StreamingRecognition {
 
     typealias Translate = (String, Bool, @MainActor (String) -> Void) async throws -> TranslationResult
 
-    func runFile(options: TranslationOptions, model: StreamingSpeechModel, archive: String, file: URL, ready: () -> Void,
+    func runFile(options: TranslationOptions, model: StreamingSpeechModel?, archive: String, file: URL, ready: () -> Void,
                  caption: (TranslationCaption) -> Void, diagnostic: TranslationDiagnosticLog?) async throws {
         let (directory, arguments) = try await prepareRecognition(options: options, model: model, archive: archive,
-                                                                  diagnostic: diagnostic)
+                                                                  diagnostic: diagnostic, imported: true)
         try Task.checkCancellation()
         let contents = Bundle.main.bundleURL.appendingPathComponent("Contents")
         let pipe = Pipe()
@@ -45,6 +54,7 @@ final class StreamingRecognition {
         var environment = ProcessInfo.processInfo.environment
         environment["ASSISTANT_FILE_TRANSCRIPTION"] = "1"
         environment["ASSISTANT_MIC_VAD"] = "off"
+        if options.multiSpeaker { environment["ASSISTANT_MOSS_MODEL"] = options.selectedMossModel }
         helper.environment = environment
         helper.standardInput = pipe
         helper.standardOutput = output
@@ -103,8 +113,10 @@ final class StreamingRecognition {
             guard receivedAudio, decoder.terminationStatus == 0 else {
                 throw TranslationError("无法读取选定的音频文件。", "Could not read the selected audio file.")
             }
-            let silence = Data(count: packetBytes)
-            for _ in 0..<8 { try send(silence) }
+            if !options.multiSpeaker {
+                let silence = Data(count: packetBytes)
+                for _ in 0..<8 { try send(silence) }
+            }
 
             func send(_ samples: Data) throws {
                 guard samples.count % MemoryLayout<Float>.size == 0 else {
@@ -121,13 +133,15 @@ final class StreamingRecognition {
         while let line = try await received.next() {
             try Task.checkCancellation()
             let fields = line.split(separator: "\t", maxSplits: 5, omittingEmptySubsequences: false)
-            guard fields.count == 6, fields[0] == "0", fields[1] == "1",
+            guard fields.count == 6, fields[0] == "0",
+                  fields[1] == "1" || (options.multiSpeaker && fields[1].hasPrefix("M")),
                   let speakerID = Int(fields[2]), let start = Int64(fields[3]), let end = Int64(fields[4]),
                   fields[5].contains(where: { $0.isLetter || $0.isNumber }) else { continue }
             paragraphCount += 1
             let item = TranslationCaption(id: paragraphCount, microphone: false,
                 source: String(fields[5]), translation: nil, translationFinal: false,
-                speakerID: speakerID, startMs: start, endMs: end)
+                speakerID: speakerID, startMs: start, endMs: end,
+                speakerBatch: options.multiSpeaker ? Int(fields[1].dropFirst()) : nil)
             caption(item)
         }
         try Task.checkCancellation()
@@ -139,10 +153,10 @@ final class StreamingRecognition {
         }
     }
 
-    func run(options: TranslationOptions, model: StreamingSpeechModel, archive: String, record: Bool, capturing: () -> Void, ready: () -> Void,
+    func run(options: TranslationOptions, model: StreamingSpeechModel?, archive: String, record: Bool, capturing: () -> Void, ready: () -> Void,
              translationReady: (() async throws -> Void)?, caption: @escaping (TranslationCaption) -> Void,
              translate: Translate?, diagnostic: TranslationDiagnosticLog?) async throws {
-        diagnostic?.write("speech_model_selected model=\(model.id)")
+        diagnostic?.write("speech_model_selected model=\(model?.id ?? "moss")")
         let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
         let helperURL = folder.appendingPathComponent("Helpers/streaming-asr")
         let (lines, events) = AsyncThrowingStream<String, Error>.makeStream()
@@ -156,17 +170,22 @@ final class StreamingRecognition {
             stereo: options.systemAudio && options.microphone) : nil
         recording = recorder
         let audio = StreamingAudioBuffer()
+        let enqueue: (Data) -> Void = { data in
+            if !audio.append(data) {
+                events.finish(throwing: TranslationError("暂存音频已满，语音识别跟不上。", "The audio buffer is full; recognition could not keep up."))
+            }
+        }
         let send: (Data) -> Void = { data in
             if let recorder, !recorder.append(data) {
                 events.finish(throwing: TranslationRecordingError(message: TranslationError(
                     "录音写入速度跟不上。", "The audio recorder could not keep up.")))
             }
-            if !audio.append(data) {
-                events.finish(throwing: TranslationError("暂存音频已满，语音识别跟不上。", "The audio buffer is full; recognition could not keep up."))
-            }
+            enqueue(data)
         }
-        let system = StreamingAudioPacketizer(source: 0, emit: send)
-        let microphone = StreamingAudioPacketizer(source: 1, emit: send)
+        let clock = options.multiSpeaker && options.systemAudio && options.microphone
+            ? ProcessInfo.processInfo.systemUptime : nil
+        let system = StreamingAudioPacketizer(source: 0, emit: send, clock: clock, emitOffset: enqueue)
+        let microphone = StreamingAudioPacketizer(source: 1, emit: send, clock: clock, emitOffset: enqueue)
         let capture = TranslationAudioCapture(system: system.append, microphone: microphone.append) {
             diagnostic?.failure("audio_capture_failed", $0)
             events.finish(throwing: $0)
@@ -190,6 +209,15 @@ final class StreamingRecognition {
         try Task.checkCancellation()
         diagnostic?.write("audio_capture_ready")
         capturing()
+        var finishedInput = false
+        if options.multiSpeaker {
+            finishCapture = {
+                finishedInput = true
+                timer.cancel()
+                capture.stop()
+                audio.finish()
+            }
+        }
 
         let (model, arguments) = try await prepareRecognition(options: options, model: model, archive: archive,
                                                               diagnostic: diagnostic)
@@ -199,7 +227,7 @@ final class StreamingRecognition {
         helper.arguments = arguments
         let correction = StreamingSpeechModel.correction
         let correctionArchive = options.selectedCorrectionModel
-        let correctParagraphs = options.enableCorrection && !correctionArchive.isEmpty &&
+        let correctParagraphs = !options.multiSpeaker && options.enableCorrection && !correctionArchive.isEmpty &&
             correction.languages.contains(options.selectedSourceLanguage)
         diagnostic?.write("review_configuration enabled=\(options.enableCorrection) archive_found=\(!correctionArchive.isEmpty) eligible=\(correctParagraphs)")
         if correctParagraphs {
@@ -211,6 +239,7 @@ final class StreamingRecognition {
         environment["ASSISTANT_MIC_VAD"] = options.microphone ? options.microphoneFilter : "off"
         environment["ASSISTANT_MIC_PAUSE"] = options.microphonePause
         environment["ASSISTANT_MIC_VAD_MODEL"] = FileManager.default.isReadableFile(atPath: detector.path) ? detector.path : nil
+        if options.multiSpeaker { environment["ASSISTANT_MOSS_MODEL"] = options.selectedMossModel }
         helper.environment = environment
         let input = Pipe()
         let output = Pipe()
@@ -236,18 +265,22 @@ final class StreamingRecognition {
         let deadline = Task {
             try await Task.sleep(nanoseconds: 60_000_000_000)
             diagnostic?.write("speech_helper_ready_timeout")
-            events.finish(throwing: TranslationError("加载中英流式模型超时。", "Streaming ASR model load timed out."))
+            events.finish(throwing: options.multiSpeaker
+                ? TranslationError("加载多人模型超时。", "Multi-speaker model load timed out.")
+                : TranslationError("加载流式模型超时。", "Streaming ASR model load timed out."))
         }
         defer { deadline.cancel() }
         var received = lines.makeAsyncIterator()
         guard try await received.next() == "ready" else {
             diagnostic?.write("speech_helper_invalid_or_missing_ready")
-            throw TranslationError("中英流式识别启动失败。", "Streaming ASR failed to start.")
+            throw options.multiSpeaker
+                ? TranslationError("多人识别启动失败。", "Multi-speaker recognition failed to start.")
+                : TranslationError("流式识别启动失败。", "Streaming ASR failed to start.")
         }
         deadline.cancel()
         diagnostic?.write("fast_engine_ready")
         let replayBoundary: [UInt32] = [.max, 2, 0]
-        guard audio.append(replayBoundary.withUnsafeBytes { Data($0) }) else {
+        guard options.multiSpeaker || audio.append(replayBoundary.withUnsafeBytes { Data($0) }) else {
             throw TranslationError("暂存音频已满，语音识别跟不上。", "The audio buffer is full; recognition could not keep up.")
         }
 
@@ -291,6 +324,7 @@ final class StreamingRecognition {
         var draftRequest: Task<TranslationResult, Error>?
         var draftInput: (id: Int, source: String)?
         var draftHasOutput = false
+        var recognitionFinished = false
 
         let translator = Task {
             guard let translationReady else { return }
@@ -318,6 +352,7 @@ final class StreamingRecognition {
                     }
                     continue
                 }
+                if recognitionFinished { return }
                 let now = ProcessInfo.processInfo.systemUptime
                 var nextDeadline: Double?
                 var chosen: Int?
@@ -428,6 +463,17 @@ final class StreamingRecognition {
             let rawSource = fields[5]
             let source = rawSource.trimmingCharacters(in: .whitespacesAndNewlines)
             let kind = fields[1]
+            if options.multiSpeaker, kind.hasPrefix("M"), let batch = Int(kind.dropFirst()),
+               source.contains(where: { $0.isLetter || $0.isNumber }) {
+                nextID += 1
+                let item = TranslationCaption(id: nextID, microphone: index == 1, source: source,
+                    translation: nil, translationFinal: false, speakerID: speakerID, startMs: startMs, endMs: endMs,
+                    speakerBatch: batch, mixedAudio: options.microphone && options.systemAudio)
+                caption(item)
+                if translationReady != nil { queueFinal(item) }
+                signal.yield(())
+                continue
+            }
             let correctionID = kind.first.map { "FRE".contains($0) } == true ? Int(kind.dropFirst()) : nil
             if let correctionID, kind.first != "F" {
                 guard var corrected = pendingCorrections.removeValue(forKey: correctionID) else { continue }
@@ -491,6 +537,15 @@ final class StreamingRecognition {
             signal.yield(())
         }
         try Task.checkCancellation()
+        if finishedInput {
+            let exitCode = await Task.detached { helper.waitUntilExit(); return helper.terminationStatus }.value
+            guard exitCode == 0 else { throw TranslationError("多人识别失败。", "Multi-speaker recognition failed.") }
+            recognitionFinished = true
+            signal.yield(())
+            try await translator.value
+            return
+        }
+        if options.multiSpeaker { throw TranslationError("多人识别已意外退出。", "Multi-speaker recognition exited unexpectedly.") }
         throw TranslationError("中英流式识别已意外退出。", "Streaming ASR exited unexpectedly.")
 
         func queueFinal(_ item: TranslationCaption) {
@@ -537,8 +592,18 @@ final class StreamingRecognition {
         return text.dropLast().suffix(3).allSatisfy { $0.isASCII && $0.isLetter && $0.isLowercase }
     }
 
-    private func prepareRecognition(options: TranslationOptions, model: StreamingSpeechModel, archive: String,
-                                    diagnostic: TranslationDiagnosticLog?) async throws -> (URL, [String]) {
+    private func prepareRecognition(options: TranslationOptions, model: StreamingSpeechModel?, archive: String,
+                                    diagnostic: TranslationDiagnosticLog?, imported: Bool = false) async throws -> (URL, [String]) {
+        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
+        let sherpa = folder.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path
+        if options.multiSpeaker {
+            let sources = imported ? 1 : (options.systemAudio ? 1 : 0) + (options.microphone ? 2 : 0)
+            return (folder, ["--moss", sherpa, folder.appendingPathComponent("Frameworks/Moss/libtranscribe.dylib").path,
+                              options.compute == "cpu" ? "cpu" : "auto", String(sources)])
+        }
+        guard let model else {
+            throw TranslationError("缺少流式识别模型。", "The streaming recognition model is missing.")
+        }
         let speaker = options.selectedSpeakerModel
         let speakerFile = "speaker.gguf"
         let preparation = Task.detached {
@@ -553,8 +618,7 @@ final class StreamingRecognition {
         let directory = try await withTaskCancellationHandler(operation: { try await preparation.value },
                                                           onCancel: { preparation.cancel() })
         try Task.checkCancellation()
-        let folder = Bundle.main.bundleURL.appendingPathComponent("Contents")
-        var arguments = ["1", folder.appendingPathComponent("Frameworks/libsherpa-onnx-c-api.dylib").path]
+        var arguments = ["1", sherpa]
         if !speaker.isEmpty {
             arguments += [speakerFile, folder.appendingPathComponent("Frameworks/Diarization/libnemo_speech_asr_c.dylib").path,
                           options.compute == "cpu" ? "cpu" : "auto"]
@@ -779,13 +843,17 @@ private final class StreamingAudioBuffer: @unchecked Sendable {
 private final class StreamingAudioPacketizer: @unchecked Sendable {
     private let source: UInt32
     private let emit: (Data) -> Void
+    private let clock: Double?
+    private let emitOffset: (Data) -> Void
     private let lock = NSLock()
     private var rate: UInt32 = 0
     private var lastPacket = 0.0
 
-    init(source: UInt32, emit: @escaping (Data) -> Void) {
+    init(source: UInt32, emit: @escaping (Data) -> Void, clock: Double?, emitOffset: @escaping (Data) -> Void) {
         self.source = source
         self.emit = emit
+        self.clock = clock
+        self.emitOffset = emitOffset
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -793,8 +861,15 @@ private final class StreamingAudioPacketizer: @unchecked Sendable {
               buffer.format.channelCount > 0 else { return }
         lock.lock()
         defer { lock.unlock() }
+        let now = ProcessInfo.processInfo.systemUptime
+        if rate == 0, let clock {
+            let elapsed = now - clock - Double(buffer.frameLength) / buffer.format.sampleRate
+            let offset = UInt32(min(Double(UInt32.max), max(0, elapsed) * 16_000))
+            let header: [UInt32] = [UInt32.max - 1, source, offset].map { $0.littleEndian }
+            emitOffset(header.withUnsafeBytes { Data($0) })
+        }
         rate = UInt32(buffer.format.sampleRate)
-        lastPacket = ProcessInfo.processInfo.systemUptime
+        lastPacket = now
         let channelCount = Int(buffer.format.channelCount)
         for offset in stride(from: 0, to: Int(buffer.frameLength), by: 32768) {
             let count = min(32768, Int(buffer.frameLength) - offset)

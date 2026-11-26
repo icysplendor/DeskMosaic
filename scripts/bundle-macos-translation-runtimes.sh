@@ -24,6 +24,7 @@ install_name_tool -rpath @loader_path @loader_path/../Frameworks "$helpers/llama
 
 mkdir -p "$work/include/sherpa-onnx/c-api"
 cp "$work/c-api.h" "$work/include/sherpa-onnx/c-api/"
+cp "$work/transcribe.h" "$work/include/"
 tar -xjf "$work/sherpa-mac.tar.bz2" -C "$work"
 sherpa="$work/sherpa-onnx-v2.0.2-osx-arm64-shared-no-tts-lib/lib"
 cp "$sherpa/libsherpa-onnx-c-api.dylib" "$sherpa/libonnxruntime.dylib" "$libraries/"
@@ -37,6 +38,13 @@ cp -P "$nemo/lib/"libggml*.dylib "$nemo/lib/"libllama*.dylib \
   "$nemo/lib/"libnemo_speech_{asr*,speechlm,text_normalization}.dylib "$diarization/"
 cp -R "$nemo/share/licenses/nemo-speech" "$licenses/nemo-speech"
 
+tar -xzf "$work/moss-macos.tar.gz" -C "$work"
+moss="$work/transcribe-native-macos-arm64-metal"
+moss_runtime="$libraries/Moss"
+mkdir -p "$moss_runtime"
+cp "$moss/"*.dylib "$moss_runtime/"
+cp -R "$moss/licenses" "$licenses/transcribe.cpp"
+
 cc -arch arm64 -mmacosx-version-min=13.3 -O2 -I "$work/include" -I "$nemo/include" \
   "$scripts/translation/streaming-asr.c" -o "$helpers/streaming-asr"
 cp "$work/streaming-license.txt" "$licenses/sherpa-onnx.txt"
@@ -45,7 +53,7 @@ unzip -p "$work/ort-mac.zip" '*/ThirdPartyNotices.txt' > "$licenses/onnxruntime-
 
 timestamp=--timestamp
 if [[ "$identity" == "-" || "${DESKMOSAIC_MAC_LOCAL_SIGNING:-0}" == 1 ]]; then timestamp=--timestamp=none; fi
-for component in "$libraries/"*.dylib "$diarization/"*.dylib "$helpers/llama-server" "$helpers/streaming-asr"; do
+for component in "$libraries/"*.dylib "$diarization/"*.dylib "$moss_runtime/"*.dylib "$helpers/llama-server" "$helpers/streaming-asr"; do
   if [[ ! -L "$component" ]]; then
     signing_options=(--force --options runtime "$timestamp" --sign "$identity")
     if [[ ( "$identity" == "-" || "${DESKMOSAIC_MAC_LOCAL_SIGNING:-0}" == 1 ) && ( "$component" == "$helpers/llama-server" || "$component" == "$helpers/streaming-asr" ) ]]; then
@@ -60,3 +68,4 @@ done
 
 "$helpers/streaming-asr" --check "$libraries/libsherpa-onnx-c-api.dylib"
 "$helpers/streaming-asr" --check-diarization "$diarization/libnemo_speech_asr_c.dylib"
+"$helpers/streaming-asr" --check-moss "$moss_runtime/libtranscribe.dylib"

@@ -27,6 +27,10 @@ internal sealed record TranslationModelDownload(string Url, string FileName, lon
         "https://huggingface.co/mradermacher/LMT-60-0.6B-GGUF/resolve/86942b9f925bfccd4196d4982578b46413a1f73f/LMT-60-0.6B.Q8_0.gguf",
         "LMT-60-0.6B.Q8_0.gguf", 804_753_504, "687f437379cf9c20f37e8bb973e084ab2bb4604f01b53292392253129df7261e");
 
+    internal static readonly TranslationModelDownload Moss = new(
+        "https://huggingface.co/handy-computer/MOSS-Transcribe-Diarize-gguf/resolve/5780e665a3eb60694e0402ed25b6775ee587681b/MOSS-Transcribe-Diarize-Q8_0.gguf",
+        "MOSS-Transcribe-Diarize-Q8_0.gguf", 986_900_160, "6bc3afe18c18ceec90f8c7e22300942db27ff0549c08f8e864f7168866445944");
+
     internal static readonly TranslationModelDownload OnlineSpeaker = new(
         "https://huggingface.co/nvidia/Nemotron-3-Diarization/resolve/6a002fd9cad5e8dfa624d97a7ee0388a7153243d/Nemotron-3-Diarization.q8_0.gguf",
         "Nemotron-3-Diarization.q8_0.gguf", 107_012_128,

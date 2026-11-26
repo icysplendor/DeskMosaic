@@ -207,6 +207,7 @@ jobs:
           contents="$mount_point/DeskMosaic.app/Contents"
           "$contents/Helpers/streaming-asr" --check "$contents/Frameworks/libsherpa-onnx-c-api.dylib"
           "$contents/Helpers/streaming-asr" --check-diarization "$contents/Frameworks/Diarization/libnemo_speech_asr_c.dylib"
+          "$contents/Helpers/streaming-asr" --check-moss "$contents/Frameworks/Moss/libtranscribe.dylib"
           "$contents/Helpers/streaming-asr" --check-vad "$contents/Frameworks/libsherpa-onnx-c-api.dylib" "$contents/Resources/silero_vad.onnx"
           "$contents/Helpers/llama-server" --help >/dev/null
           python3 scripts/check-recording-encoder.py "$mount_point/DeskMosaic.app/Contents/Helpers/ffmpeg"
@@ -291,6 +292,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Bundled streaming recognition engine failed to load" }
           & (Join-Path $destination "streaming/streaming-asr.exe") --check-vad - (Join-Path $destination "streaming/silero_vad.onnx")
           if ($LASTEXITCODE -ne 0) { throw "Bundled microphone detector failed to load" }
+          & (Join-Path $destination "streaming/streaming-asr.exe") --check-moss -
+          if ($LASTEXITCODE -ne 0) { throw "MOSS runtime check failed" }
           & (Join-Path $destination "streaming/streaming-asr.exe") --check-diarization -
           if ($LASTEXITCODE -ne 0) { throw "Bundled streaming diarization engine failed to load" }
           & (Join-Path $destination "llama/llama-server.exe") --help

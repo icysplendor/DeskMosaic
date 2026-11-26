@@ -35,6 +35,7 @@ internal sealed class TranslationWindow : Window
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+    private readonly CheckBox multiSpeaker = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox showSource = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox audioSource = new() { MinWidth = 132, VerticalAlignment = VerticalAlignment.Center };
     private readonly ComboBox sourceLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
@@ -48,6 +49,7 @@ internal sealed class TranslationWindow : Window
     private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review, TextBlock Cache)> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
     private CancellationTokenSource? session;
+    private CancellationTokenSource? finishInput;
     private Task? sessionCompletion;
     private bool recordingSession;
     private bool identifiesSpeakers;
@@ -212,6 +214,16 @@ internal sealed class TranslationWindow : Window
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
         languages.Children.Add(recordAudio);
+        multiSpeaker.Foreground = Foreground;
+        multiSpeaker.Content = T("多人", "Multi-speaker");
+        multiSpeaker.ToolTip = T("用 MOSS 转写可能重叠的语音。双音源会合并识别。",
+            "Use MOSS for overlapping speech. Both inputs are transcribed together.");
+        multiSpeaker.Click += (_, _) =>
+        {
+            ConfigurationStore.Shared.Update(config => config.Translation.MultiSpeaker = multiSpeaker.IsChecked == true);
+            SetAudioFile(audioFile, reselected: true);
+        };
+        languages.Children.Add(multiSpeaker);
         start.Margin = new Thickness(10, 0, 0, 0);
         twoWay.Margin = new Thickness(8, 0, 0, 0);
         languages.Children.Add(start);
@@ -315,9 +327,12 @@ internal sealed class TranslationWindow : Window
 
     private void UpdateLanguageControls()
     {
-        sourceLanguage.IsEnabled = session is null && sourceLanguage.Items.Count != 0;
+        var options = SessionOptions();
+        sourceLanguage.IsEnabled = session is null && !options.MultiSpeaker && sourceLanguage.Items.Count != 0;
         bool translating = transcribeOnly.IsChecked != true;
         transcribeOnly.IsEnabled = session is null;
+        multiSpeaker.IsEnabled = session is null;
+        multiSpeaker.IsChecked = ConfigurationStore.Shared.Configuration.Translation.MultiSpeaker;
         recordAudio.IsEnabled = session is null && audioFile is null;
         recordAudio.IsChecked = audioFile is null && ConfigurationStore.Shared.Configuration.Translation.RecordAudio;
         recordAudio.ToolTip = audioFile is null
@@ -325,13 +340,13 @@ internal sealed class TranslationWindow : Window
             : T("导入音频时无法录音", "Recording is unavailable for imported audio");
         fileNotice.IsEnabled = session is null;
         targetLanguage.IsEnabled = session is null && translating && targetLanguage.Items.Count != 0;
-        var options = SessionOptions();
         bool twoWayReady = options.CanTranslateTwoWay;
         twoWay.Visibility = session is null && !fileCompleted ? Visibility.Visible : Visibility.Collapsed;
         twoWay.IsEnabled = session is null && translating && twoWayReady;
         twoWay.ToolTip = !translating
             ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
+                : options.MultiSpeaker ? T("需要 MOSS 多人模型和文本翻译模型", "Requires MOSS and a translation model")
                 : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
         start.IsEnabled = !fileCompleted;
         start.Content = fileCompleted ? T("音频执行完毕", "Audio processing complete")
@@ -456,7 +471,16 @@ internal sealed class TranslationWindow : Window
 
     private void Toggle(bool twoWayMode)
     {
-        if (session is not null) { Stop(); return; }
+        if (session is not null)
+        {
+            if (finishInput is { IsCancellationRequested: false } input && !session.IsCancellationRequested)
+            {
+                SetStatus(T("正在处理剩余语音…", "Processing remaining speech…"));
+                input.Cancel();
+            }
+            else Stop();
+            return;
+        }
         if (!fileCompleted) sessionCompletion = RunSessionAsync(twoWayMode);
     }
 
@@ -472,10 +496,12 @@ internal sealed class TranslationWindow : Window
         audioSource.IsEnabled = compute.IsEnabled = false;
         UpdateLanguageControls();
         var options = ConfigurationStore.Shared.Configuration.Translation.Copy();
+        using var input = options.MultiSpeaker && file is null ? new CancellationTokenSource() : null;
+        finishInput = input;
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = options.MultiSpeaker || options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;
@@ -496,18 +522,19 @@ internal sealed class TranslationWindow : Window
             speechReady = false;
             await Task.Run(() => new TranslationEngine().RunAsync(options, () => PostCaption(() =>
             {
-                if (!speechReady)
+                if (!speechReady && input?.IsCancellationRequested != true)
                     SetStatus(record ? T("正在录音 · 加载模型…", "Recording · Loading models…") :
                         T("正在采集 · 加载模型…", "Capturing audio · Loading models…"), listening: true);
             }), backend => PostCaption(() =>
             {
+                if (input?.IsCancellationRequested == true) return;
                 speechReady = !fileSession;
                 if (fileSession)
                     SetStatus(backend is null ? T("正在识别音频文件…", "Transcribing audio file…")
                         : T("正在处理音频 · 逐段翻译", "Processing audio · Translating") + " · " + backend, listening: true);
                 else
                     SetStatus(backend is null ? listening : listening + " · " + backend, listening: true);
-            }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved, file));
+            }), caption => PostCaption(() => ApplyCaption(caption)), current.Token, onSaved, file, input?.Token ?? default));
             completed = fileSession;
         }
         catch (Exception error) when (current.IsCancellationRequested && error is not TranslationRecordingException) { }
@@ -529,6 +556,7 @@ internal sealed class TranslationWindow : Window
             if (savedRecording is not null && !failed) result = T("录音已保存", "Recording saved");
             SetStatus(result, failed: failed, details: savedRecording);
             session = null;
+            finishInput = null;
             recordingSession = false;
             twoWaySession = false;
             audioSource.IsEnabled = compute.IsEnabled = true;
@@ -629,13 +657,15 @@ internal sealed class TranslationWindow : Window
         {
             if (row.Speaker.IsReadOnly)
             {
-                row.Speaker.Tag = item.SpeakerId;
+                row.Speaker.Tag = item.SpeakerBatch > 0 ? 0 : item.SpeakerId;
                 bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0;
                 row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
-                row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
-                row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
-                if (unknown) row.Speaker.ToolTip = T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably");
-                else row.Speaker.ToolTip = T("双击修改说话人姓名", "Double-click to rename the speaker");
+                row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed")
+                    : item.SpeakerBatch > 0 ? ScopedSpeakerName(item) : SpeakerName(item.SpeakerId);
+                row.Speaker.Cursor = unknown || item.SpeakerBatch > 0 ? Cursors.Arrow : Cursors.Hand;
+                row.Speaker.ToolTip = unknown ? T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably")
+                    : item.SpeakerBatch > 0 ? T("说话人编号仅在当前识别段内有效", "Speaker numbers apply within this transcription batch")
+                    : T("双击修改说话人姓名", "Double-click to rename the speaker");
             }
             row.Time.Text = item.TimeRange;
             row.Review.Visibility = item.Review == CaptionReview.None ? Visibility.Collapsed : Visibility.Visible;
@@ -753,6 +783,9 @@ internal sealed class TranslationWindow : Window
         ResetTranscript();
     }
 
+    private string ScopedSpeakerName(TranslationCaption item) =>
+        $"{T("段", "Batch")} {item.SpeakerBatch} · {T("说话人", "Speaker")} {item.SpeakerId}";
+
     private string SpeakerName(int id) =>
         speakerNames.GetValueOrDefault(id) ?? $"{T("说话人", "Speaker")} {id}";
 
@@ -853,6 +886,7 @@ internal sealed class TranslationWindow : Window
     }
 
     private string SourceLabel(TranslationCaption item) => fileSession ? T("导入音频", "Imported audio")
+        : item.MixedAudio ? T("混合音频", "Mixed audio")
         : item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio");
 
     private bool ShowOriginal(TranslationCaption item, bool keepSource) =>
@@ -889,7 +923,11 @@ internal sealed class TranslationWindow : Window
             if (source.Length == 0 && translation.Length == 0) continue;
 
             string heading = SourceLabel(item);
-            if (item.SpeakerId > 0)
+            if (item.SpeakerBatch > 0 && item.SpeakerId > 0)
+            {
+                heading += " · " + ScopedSpeakerName(item);
+            }
+            else if (item.SpeakerId > 0)
             {
                 string speakerId = $"{T("说话人", "Speaker")} {item.SpeakerId}";
                 string speaker = speakerNames.TryGetValue(item.SpeakerId, out var name)

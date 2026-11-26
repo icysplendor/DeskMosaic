@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#include <wchar.h>
 typedef HMODULE NativeLibrary;
 #define SYMBOL(name) GetProcAddress(library, #name)
 #else
@@ -101,6 +102,8 @@ static MicrophoneVad load_microphone_vad(NativeLibrary library) {
   return microphone_vad;
 }
 
+#include "moss-asr.h"
+
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--help") == 0)
     return puts("streaming-asr THREADS LIBRARY [speaker.gguf DIAR_LIBRARY cpu|auto] [--correction MODEL_DIRECTORY]") < 0;
@@ -109,6 +112,7 @@ int main(int argc, char **argv) {
     correction_directory = argv[argc - 1];
     argc -= 2;
   }
+  int moss = argc == 6 && strcmp(argv[1], "--moss") == 0;
   int checking_vad = argc == 4 && strcmp(argv[1], "--check-vad") == 0;
   if (argc != 3 && argc != 6 && !checking_vad) return 2;
 #ifdef _WIN32
@@ -126,6 +130,10 @@ int main(int argc, char **argv) {
   if (argc == 3 && strcmp(argv[1], "--record") == 0) {
     int channels = atoi(argv[2]);
     return channels == 1 || channels == 2 ? run_wave_recorder(channels) : 2;
+  }
+  if (argc == 3 && strcmp(argv[1], "--check-moss") == 0) {
+    MossApi api = {0};
+    return moss_load_api(&api, moss_library(argv[2])) ? 0 : 4;
   }
   Diarizer diar = {0};
   if (strcmp(argv[1], "--check-diarization") == 0) return diar_library(&diar, argv[2], 0) ? 0 : 4;
@@ -148,6 +156,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   startup_diagnostic("speech_library_loaded");
+  if (moss) return run_moss(argv[3], library, strcmp(argv[4], "cpu") == 0, atoi(argv[5]));
   if (checking_vad) {
     MicrophoneVad vad = load_microphone_vad(library);
     microphone_vad_start(&vad, argv[3], 0.35f);

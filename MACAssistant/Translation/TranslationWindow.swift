@@ -29,6 +29,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     private var job: Task<Void, Never>?
     private var engine: TranslationEngine?
     private var clearedThroughCaption = 0
+    private var inputFinishing = false
 
     func show() {
         if window?.isVisible != true && !running {
@@ -129,7 +130,14 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
     }
 
     func toggle(twoWay: Bool = false) {
-        guard job == nil else { stop(); return }
+        if job != nil {
+            if engine?.finishLiveInput() == true {
+                inputFinishing = true
+                listening = false
+                status = t("正在处理剩余语音…", "Processing remaining speech…")
+            } else { stop() }
+            return
+        }
         guard !fileCompleted else { return }
         let file = audioFile
         fileSession = file != nil
@@ -141,7 +149,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
+        identifiesSpeakers = options.multiSpeaker || !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true
@@ -158,6 +166,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                 job = nil
                 running = false
                 listening = false
+                inputFinishing = false
                 speechReady = false
                 recording = false
                 twoWaySession = false
@@ -179,6 +188,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                     self.status = record ? self.t("正在录音 · 加载模型…", "Recording · Loading models…") :
                         self.t("正在采集 · 加载模型…", "Capturing audio · Loading models…")
                 }, status: { backend in
+                    guard !self.inputFinishing else { return }
                     self.listening = true
                     self.speechReady = file == nil
                     if file != nil {
@@ -219,6 +229,10 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         captions.removeAll()
     }
 
+    func scopedSpeakerName(batch: Int, speaker: Int) -> String {
+        "\(t("段", "Batch")) \(batch) · \(t("说话人", "Speaker")) \(speaker)"
+    }
+
     func speakerName(_ id: Int) -> String {
         speakerNames[id] ?? "\(t("说话人", "Speaker")) \(id)"
     }
@@ -242,7 +256,9 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             guard !source.isEmpty || !translation.isEmpty else { continue }
 
             var heading = sourceLabel(item)
-            if item.speakerID > 0 {
+            if let batch = item.speakerBatch, item.speakerID > 0 {
+                heading += " · " + scopedSpeakerName(batch: batch, speaker: item.speakerID)
+            } else if item.speakerID > 0 {
                 let speakerID = "\(t("说话人", "Speaker")) \(item.speakerID)"
                 let speaker = speakerNames[item.speakerID].map {
                     "\($0.components(separatedBy: .newlines).joined(separator: " ")) (\(speakerID))"
@@ -297,6 +313,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
 
     func sourceLabel(_ item: TranslationCaption) -> String {
         if fileSession { return t("导入音频", "Imported audio") }
+        if item.mixedAudio { return t("混合音频", "Mixed audio") }
         return item.microphone ? t("麦克风", "Microphone") : t("电脑声音", "System audio")
     }
 
@@ -455,7 +472,7 @@ private struct TranslationWindowView: View {
             HStack(spacing: 6) {
                 languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
                                  available: controller.sessionOptions.sessionSourceLanguages)
-                    .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
+                    .disabled(controller.sessionOptions.multiSpeaker || controller.sessionOptions.sessionSourceLanguages.isEmpty)
                 Button { controller.swapLanguages() } label: {
                     Image(systemName: "arrow.left.arrow.right")
                 }
@@ -481,6 +498,18 @@ private struct TranslationWindowView: View {
                 .controlSize(.small)
                 .fixedSize()
                 .disabled(controller.running || controller.audioFile != nil)
+            Toggle(t("多人", "Multi-speaker"), isOn: Binding(
+                get: { settings.translationOptions.multiSpeaker },
+                set: { enabled in
+                    settings.translationBinding(\.multiSpeaker).wrappedValue = enabled
+                    if let file = controller.audioFile { controller.setAudioFile(file, reselected: true) }
+                }
+            ))
+            .help(t("用 MOSS 转写可能重叠的语音。双音源会合并识别。", "Use MOSS for overlapping speech. Both inputs are transcribed together."))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(controller.running)
             sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                 .disabled(controller.fileCompleted)
                 .padding(.leading, 4)
@@ -520,7 +549,9 @@ private struct TranslationWindowView: View {
     private var twoWayHelp: String {
         if controller.transcribeOnly { return t("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation") }
         if !controller.sessionOptions.canTranslateTwoWay {
-            return t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
+            return controller.sessionOptions.multiSpeaker
+                ? t("需要 MOSS 多人模型和文本翻译模型", "Requires MOSS and a translation model")
+                : t("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model")
         }
         return t("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
     }
@@ -668,9 +699,13 @@ private struct TranslationWindowView: View {
             }
             HStack(spacing: 8) {
                 Label(controller.sourceLabel(caption),
-                      systemImage: controller.fileSession ? "waveform" : caption.microphone ? "mic" : "speaker.wave.2")
+                      systemImage: controller.fileSession || caption.mixedAudio ? "waveform" : caption.microphone ? "mic" : "speaker.wave.2")
                     .foregroundStyle(.secondary)
-                if caption.speakerID > 0 {
+                if let batch = caption.speakerBatch, caption.speakerID > 0 {
+                    Text(controller.scopedSpeakerName(batch: batch, speaker: caption.speakerID))
+                        .foregroundStyle(.secondary)
+                        .help(t("说话人编号仅在当前识别段内有效", "Speaker numbers apply within this transcription batch"))
+                } else if caption.speakerID > 0 {
                     SpeakerNameView(controller: controller, speakerID: caption.speakerID,
                                     help: t("双击修改说话人姓名", "Double-click to rename the speaker"),
                                     editingLabel: t("编辑中", "Editing"))
@@ -869,7 +904,11 @@ struct TranslationSettingsView: View {
                 ), url: correction.download.url, type: .data, model: correction.download)
                 Toggle(t("模型就绪时启用段末修正", "Enable second pass when installed"),
                        isOn: settings.translationBinding(\.enableCorrection))
-                file(t("流式说话人模型", "Streaming speaker model"), path: Binding(
+                file(t("多人模式 · MOSS 0.9B Q8", "Multiple speakers · MOSS 0.9B Q8"), path: Binding(
+                    get: { settings.translationOptions.selectedMossModel },
+                    set: { settings.translationBinding(\.mossModel).wrappedValue = $0 }
+                ), url: TranslationModelDownload.moss.url, type: UTType(filenameExtension: "gguf"), model: .moss)
+                file(t("普通模式 · 流式说话人模型", "Standard mode · Streaming speaker model"), path: Binding(
                     get: { settings.translationOptions.selectedSpeakerModel },
                     set: { settings.translationBinding(\.onlineSpeakerModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.onlineSpeaker.url, type: UTType(filenameExtension: "gguf"), model: .onlineSpeaker)

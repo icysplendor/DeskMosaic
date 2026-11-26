@@ -42,8 +42,14 @@ fetch "$silero/files/silero_vad.onnx" silero_vad.onnx \
 fetch "$silero/LICENSE" silero-vad-LICENSE.txt \
   2e63e9a38b6e8fc0c7bc37ce174caca1862870856c6daf5697cfb785e925520b
 
+moss=https://github.com/handy-computer/transcribe.cpp/releases/download/v0.4.2
+fetch https://raw.githubusercontent.com/handy-computer/transcribe.cpp/v0.4.2/include/transcribe.h transcribe.h \
+  5c8267936370f40d911866df8617cb320dda6dba951e5ba89287645988105dbf
+
 case "${1:-}" in
   windows)
+    fetch "$moss/transcribe-native-0.4.2-windows-x86_64-cpu-vulkan.tar.gz" moss-windows.tar.gz \
+      6094102cf57b404b050707ceb258b12ce647b92e801b5d46077214e5b030c8aa
     fetch "$nemo/nemo-speech-0.3.0-windows-x86_64-cpu.zip" nemo-win-cpu.zip \
       4ed9740e361e4653f56c3dce7d1e81883a1c8b831c1bd7d01567fff1130b5b05
     fetch "$nemo/nemo-speech-0.3.0-windows-x86_64-vulkan.zip" nemo-win-vulkan.zip \
@@ -61,6 +67,8 @@ case "${1:-}" in
     cp "$destination/llama-license.txt" "$destination/llama-vulkan-license.txt"
     ;;
   macos)
+    fetch "$moss/transcribe-native-0.4.2-macos-arm64-metal.tar.gz" moss-macos.tar.gz \
+      75ea3a705f3edec09942fdbb1b2b5509d7ecd75bda55158a47a3ab1e2d1105b3
     fetch "$nemo/nemo-speech-0.3.0-macos-aarch64-metal.tar.gz" nemo-mac-metal.tar.gz \
       2b972ed8b5dba07492212acf8cb75cbf34ecb141198ffa1997febe84b7c4d9ed
     fetch "$sherpa/sherpa-onnx-v2.0.2-osx-arm64-shared-no-tts-lib.tar.bz2" sherpa-mac.tar.bz2 \
