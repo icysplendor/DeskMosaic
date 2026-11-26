@@ -176,12 +176,9 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                         captions[index].sourceFinal = true
                     }
                 }
-                for index in captions.indices where captions[index].translation == nil {
-                    captions[index].translation = ""
-                    for turn in captions[index].reviewTurns.indices where captions[index].reviewTurns[turn].translation == nil {
-                        captions[index].reviewTurns[turn].translation = ""
-                        captions[index].reviewTurns[turn].translationFinal = true
-                    }
+                for index in captions.indices {
+                    if captions[index].translation == nil, captions[index].reviewTurns.isEmpty { captions[index].translation = "" }
+                    if captions[index].review == .pending { captions[index].review = .unavailable }
                 }
             }
             let onSaved: ((URL) -> Void)? = record ? { self.savedRecording = $0 } : nil
@@ -422,15 +419,15 @@ private struct TranslationWindowView: View {
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(controller.captions.suffix(250)) { caption in
-                            captionRow(caption, latest: caption.id == controller.captions.last?.id)
-                                .id(caption.id)
+                        ForEach(displayedCaptions) { row in
+                            captionRow(row.caption, latest: row.id == latestCaptionID)
+                                .id(row.id)
                         }
                     }
                     .padding(8)
                 }
-                .onChange(of: controller.captions.last) { last in
-                    if let last { reader.scrollTo(last.id, anchor: .bottom) }
+                .onChange(of: controller.captions.last) { _ in
+                    if let latestCaptionID { reader.scrollTo(latestCaptionID, anchor: .bottom) }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -709,35 +706,30 @@ private struct TranslationWindowView: View {
         }
     }
 
-    private func captionRow(_ caption: TranslationCaption, latest: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if caption.reviewTurns.isEmpty {
-                captionContent(caption)
-            } else {
-                ForEach(caption.reviewTurns) { turn in
-                    captionContent(turn)
-                }
-                Divider().overlay(line)
-                HStack(spacing: 8) {
-                    Text(caption.timeRange).monospacedDigit().foregroundStyle(.secondary)
-                    Text(captionReviewLabel(.mossReviewed)).foregroundStyle(accent)
-                }
-                .font(.system(size: 11))
+    private struct DisplayedCaption: Identifiable {
+        struct ID: Hashable {
+            let paragraph: Int
+            let turn: Int
+        }
+
+        let id: ID
+        let caption: TranslationCaption
+    }
+
+    private var displayedCaptions: [DisplayedCaption] {
+        controller.captions.suffix(250).flatMap { paragraph in
+            let rows = paragraph.reviewTurns.isEmpty ? [paragraph] : paragraph.reviewTurns
+            return rows.enumerated().map { index, caption in
+                DisplayedCaption(id: .init(paragraph: paragraph.id, turn: index), caption: caption)
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 14)
-        .background(latest ? accent.opacity(dark ? 0.20 : 0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if latest { RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3) }
-        }
-        .overlay(alignment: .bottom) {
-            if !latest { Rectangle().fill(line).frame(height: 1) }
         }
     }
 
-    private func captionContent(_ caption: TranslationCaption) -> some View {
+    private var latestCaptionID: DisplayedCaption.ID? {
+        controller.captions.last.map { .init(paragraph: $0.id, turn: max(0, $0.reviewTurns.count - 1)) }
+    }
+
+    private func captionRow(_ caption: TranslationCaption, latest: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             let translation = caption.translation ?? ""
             if controller.sourceOnlySession || !caption.translationFinal ||
@@ -779,7 +771,7 @@ private struct TranslationWindowView: View {
                     .help(t("这段音频的起止时间", "Start and end time of this passage"))
                 if let review = caption.review {
                     Text(captionReviewLabel(review))
-                        .foregroundStyle(review == .revised ? accent : Color.secondary)
+                        .foregroundStyle(review == .revised || review == .mossReviewed ? accent : Color.secondary)
                 }
                 if let percent = caption.cacheHitPercent {
                     Text(t("缓存命中 \(percent)%", "Cache hit \(percent)%"))
@@ -789,6 +781,16 @@ private struct TranslationWindowView: View {
                 }
             }
             .font(.system(size: 11))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(latest ? accent.opacity(dark ? 0.20 : 0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if latest { RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3) }
+        }
+        .overlay(alignment: .bottom) {
+            if !latest { Rectangle().fill(line).frame(height: 1) }
         }
     }
 

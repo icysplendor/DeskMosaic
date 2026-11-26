@@ -337,13 +337,20 @@ final class StreamingRecognition {
                         for index in final.reviewTurns.indices {
                             let result = try await translateSafely(final.reviewTurns[index].source, provisional: false) { _ in }
                             try Task.checkCancellation()
+                            guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { break }
                             final.reviewTurns[index].translation = result.text
+                            final.reviewTurns[index].cacheHitPercent = result.cacheHitPercent
                             final.reviewTurns[index].translationFinal = true
                         }
-                        final.translation = final.reviewTurns.compactMap(\.translation).filter { !$0.isEmpty }.joined(separator: "\n")
-                        final.translationFinal = true
+                        if final.reviewTurns.allSatisfy(\.translationFinal) {
+                            final.translation = final.reviewTurns.compactMap(\.translation).joined(separator: "\n")
+                            final.translationFinal = true
+                            caption(final)
+                            continue
+                        }
+                        final = keepOriginal(final)
                         caption(final)
-                        continue
+                        if !(final.translation ?? "").isEmpty { continue }
                     }
                     let translation = try await translateSafely(final.source, provisional: false) { _ in }
                     try Task.checkCancellation()
@@ -473,13 +480,7 @@ final class StreamingRecognition {
                 corrected.review = kind.first == "E" ? .modelFailed : .kept
                 if kind.first == "G" {
                     corrected.reviewTurns = corrected.mossTurns(rawSource)
-                    if !corrected.reviewTurns.isEmpty {
-                        corrected.review = .mossReviewed
-                        corrected.startMs = corrected.reviewTurns.map(\.startMs).min() ?? startMs
-                        corrected.endMs = corrected.reviewTurns.map(\.endMs).max() ?? endMs
-                        corrected.translation = nil
-                        corrected.cacheHitPercent = nil
-                    }
+                    if !corrected.reviewTurns.isEmpty { corrected.review = .mossReviewed }
                 } else if source.contains(where: { $0.isLetter || $0.isNumber }) {
                     if source != corrected.source {
                         corrected.source = source
@@ -489,7 +490,7 @@ final class StreamingRecognition {
                     corrected.endMs = endMs
                 }
                 diagnostic?.write("paragraph id=\(corrected.id) range_ms=\(startMs)-\(endMs) review=\(String(describing: corrected.review))")
-                caption(corrected)
+                if translationReady == nil || corrected.reviewTurns.isEmpty { caption(corrected) }
                 if translationReady != nil { queueFinal(corrected) }
                 signal.yield(())
                 continue
@@ -553,7 +554,10 @@ final class StreamingRecognition {
         func queueFinal(_ item: TranslationCaption) {
             if pendingFinals.count == 256 {
                 var dropped = pendingFinals.removeFirst()
-                if (dropped.translation ?? "").isEmpty {
+                if !dropped.reviewTurns.isEmpty {
+                    dropped = keepOriginal(dropped)
+                    caption(dropped)
+                } else if (dropped.translation ?? "").isEmpty {
                     dropped.translation = ""
                     dropped.translationFinal = true
                     caption(dropped)
@@ -561,6 +565,14 @@ final class StreamingRecognition {
             }
             pendingFinals.append(item)
             draftRequest?.cancel()
+        }
+
+        func keepOriginal(_ item: TranslationCaption) -> TranslationCaption {
+            var original = item
+            original.reviewTurns = []
+            original.review = .kept
+            if original.translation == nil { original.translation = "" }
+            return original
         }
 
         func cancelStaleDraft(_ current: TranslationCaption) {

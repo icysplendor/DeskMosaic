@@ -48,7 +48,10 @@ internal sealed class TranslationWindow : Window
     private readonly ComboBox translationSize = new() { Width = 53 };
     private readonly Button export = new() { IsEnabled = false };
     private readonly List<TranslationCaption> transcript = new();
-    private readonly Dictionary<int, (TextBlock Original, TextBlock Translation, TextBox Speaker, TextBlock Time, TextBlock Review, TextBlock Cache, StackPanel Turns)> visibleRows = new();
+    private sealed record CaptionRow(Border Card, TextBlock Original, TextBlock Translation, TextBox Speaker,
+        TextBlock Time, TextBlock Review, TextBlock Cache);
+
+    private readonly Dictionary<int, CaptionRow[]> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
     private CancellationTokenSource? session;
     private CancellationTokenSource? finishInput;
@@ -579,10 +582,10 @@ internal sealed class TranslationWindow : Window
             if (sourceOnlySession && current.IsCancellationRequested)
                 foreach (var item in transcript.Where(item => !item.SourceFinal).ToArray())
                     ApplyCaption(item with { SourceFinal = true });
-            foreach (var item in transcript.Where(item => item.Translation is null).ToArray())
-                ApplyCaption(item.ReviewTurns.Length == 0 ? item with { Translation = "" }
-                    : item with { Translation = "", TranslationFinal = true,
-                        ReviewTurns = item.ReviewTurns.Select(turn => turn with { Translation = "", TranslationFinal = true }).ToArray() });
+            foreach (var item in transcript.Where(item => item.Review == CaptionReview.Pending ||
+                         item.ReviewTurns.Length == 0 && item.Translation is null).ToArray())
+                ApplyCaption(item with { Translation = item.Translation ?? "",
+                    Review = item.Review == CaptionReview.Pending ? CaptionReview.Unavailable : item.Review });
             fileCompleted = completed && !current.IsCancellationRequested;
             if (fileCompleted) result = T("音频处理完成", "Audio processing complete");
             if (savedRecording is not null && !failed) result = T("录音已保存", "Recording saved");
@@ -606,140 +609,171 @@ internal sealed class TranslationWindow : Window
         int index = item.Id - clearedThroughCaption - 1;
         if (index < 0 || index > transcript.Count) return;
         bool follow = history.ScrollableHeight - history.VerticalOffset < 24;
-        if (index == transcript.Count)
+        bool isNew = index == transcript.Count;
+        if (isNew) transcript.Add(item);
+        else transcript[index] = item;
+
+        visibleRows.TryGetValue(item.Id, out var rows);
+        if (isNew || rows is not null)
         {
-            transcript.Add(item);
-            var options = ConfigurationStore.Shared.Configuration.Translation;
-            var original = new TextBlock
+            var items = DisplayedRows(item);
+            if (rows is null || rows.Length != items.Length ||
+                items[0].SpeakerWithinParagraph && !rows[0].Speaker.IsReadOnly)
             {
-                Text = item.Source, TextWrapping = TextWrapping.Wrap,
-                FontSize = options.SelectedSourceFontSize, Foreground = Muted, Margin = new Thickness(0, 0, 0, 3)
-            };
-            var translation = new TextBlock
-            {
-                FontSize = options.SelectedTargetFontSize, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap
-            };
-            var origin = new TextBlock
-            {
-                Text = SourceLabel(item),
-                FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center
-            };
-            var editing = new TextBlock
-            {
-                Text = T("编辑中", "Editing"), FontSize = 11, Foreground = Accent, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 0, 0), Visibility = Visibility.Collapsed
-            };
-            var speaker = CreateSpeakerLabel(editing);
-            var time = new TextBlock
-            {
-                FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(9, 0, 0, 0), ToolTip = T("这段音频的起止时间", "Start and end time of this passage")
-            };
-            Typography.SetNumeralAlignment(time, FontNumeralAlignment.Tabular);
-            var review = new TextBlock
-            {
-                FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0)
-            };
-            var cache = new TextBlock
-            {
-                FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(9, 0, 0, 0),
-                ToolTip = T("本次翻译复用的输入 token 比例", "Share of prompt tokens reused for this translation")
-            };
-            Typography.SetNumeralAlignment(cache, FontNumeralAlignment.Tabular);
-            var attribution = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
-            attribution.Children.Add(origin);
-            attribution.Children.Add(speaker);
-            attribution.Children.Add(editing);
-            attribution.Children.Add(time);
-            attribution.Children.Add(review);
-            attribution.Children.Add(cache);
-            var card = new StackPanel();
-            card.Children.Add(original);
-            card.Children.Add(translation);
-            var turns = new StackPanel { Visibility = Visibility.Collapsed };
-            card.Children.Add(turns);
-            card.Children.Add(attribution);
-            if (latest is not null)
-            {
-                latest.Background = Brushes.Transparent;
-                latest.BorderBrush = Line;
-                latest.BorderThickness = new Thickness(0, 0, 0, 1);
+                int position = rows is null ? captions.Children.Count : captions.Children.IndexOf(rows[0].Card);
+                if (rows is not null) captions.Children.RemoveRange(position, rows.Length);
+                rows = items.Select(CreateCaptionRow).ToArray();
+                visibleRows[item.Id] = rows;
+                foreach (var row in rows) captions.Children.Insert(position++, row.Card);
             }
-            latest = new Border
+            for (int turn = 0; turn < items.Length; turn++) UpdateCaptionRow(rows[turn], items[turn]);
+
+            if (visibleRows.Count > 250 && visibleRows.Remove(transcript[^251].Id, out var expired))
+                captions.Children.RemoveRange(0, expired.Length);
+
+            var last = visibleRows[transcript[^1].Id][^1].Card;
+            if (latest != last)
             {
-                Child = card, Padding = new Thickness(13, 10, 13, 10),
-                Background = (Brush)Resources["CaptionHighlight"], BorderBrush = Accent,
-                BorderThickness = new Thickness(3, 0, 0, 0), CornerRadius = new CornerRadius(6)
-            };
-            captions.Children.Add(latest);
-            visibleRows.Add(item.Id, (original, translation, speaker, time, review, cache, turns));
-            if (captions.Children.Count > 250)
-            {
-                captions.Children.RemoveAt(0);
-                visibleRows.Remove(transcript[^251].Id);
+                if (latest is not null)
+                {
+                    latest.Background = Brushes.Transparent;
+                    latest.BorderBrush = Line;
+                    latest.BorderThickness = new Thickness(0, 0, 0, 1);
+                }
+                latest = last;
+                latest.Background = (Brush)Resources["CaptionHighlight"];
+                latest.BorderBrush = Accent;
+                latest.BorderThickness = new Thickness(3, 0, 0, 0);
             }
             empty.Visibility = Visibility.Collapsed;
             clear.IsEnabled = true;
         }
-        else
-        {
-            transcript[index] = item;
-        }
         export.IsEnabled |= item.SourceFinal;
-        if (visibleRows.TryGetValue(item.Id, out var row))
-        {
-            bool split = item.ReviewTurns.Length != 0;
-            if (split) row.Speaker.Visibility = Visibility.Collapsed;
-            else if (row.Speaker.IsReadOnly)
-            {
-                row.Speaker.Tag = item.SpeakerId;
-                bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0;
-                row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
-                row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
-                row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
-                if (unknown) row.Speaker.ToolTip = T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably");
-                else row.Speaker.ToolTip = T("双击修改说话人姓名", "Double-click to rename the speaker");
-            }
-            row.Time.Text = item.TimeRange;
-            row.Review.Visibility = item.Review == CaptionReview.None ? Visibility.Collapsed : Visibility.Visible;
-            row.Review.Foreground = item.Review is CaptionReview.Revised or CaptionReview.MossReviewed ? Accent : Muted;
-            row.Review.Text = item.Review switch
-            {
-                CaptionReview.Pending => T("复核中", "Reviewing"),
-                CaptionReview.Kept => T("已复核 · 保留原文", "Reviewed · Original kept"),
-                CaptionReview.Revised => T("已修正", "Revised"),
-                CaptionReview.MossReviewed => T("MOSS 已复核", "Reviewed by MOSS"),
-                CaptionReview.Disabled => T("未复核 · 功能已关闭", "Not reviewed · Disabled"),
-                CaptionReview.ModelMissing => T("未复核 · 缺少所选复核模型", "Not reviewed · Selected review model missing"),
-                CaptionReview.LanguageUnsupported => T("未复核 · 源语言不支持", "Not reviewed · Unsupported source language"),
-                CaptionReview.ModelPreparing => T("未复核 · 模型正在准备", "Not reviewed · Model preparing"),
-                CaptionReview.ModelFailed => T("未复核 · 模型加载失败", "Not reviewed · Model failed to load"),
-                CaptionReview.NoReviewableText => T("未复核 · 无可复核文字", "Not reviewed · No reviewable text"),
-                CaptionReview.AudioUnaligned => T("未复核 · 音频边界不明确", "Not reviewed · Unclear audio boundaries"),
-                CaptionReview.OutsideLimits => T("未复核 · 段落长度超出范围", "Not reviewed · Passage length out of range"),
-                CaptionReview.QueueFull => T("未复核 · 队列已满", "Not reviewed · Queue full"),
-                CaptionReview.Unavailable => T("未复核 · 状态不可用", "Not reviewed · Status unavailable"),
-                _ => ""
-            };
-            row.Cache.Visibility = item.CacheHitPercent.HasValue ? Visibility.Visible : Visibility.Collapsed;
-            row.Cache.Text = item.CacheHitPercent is int percent ? T($"缓存命中 {percent}%", $"Cache hit {percent}%") : "";
-            row.Original.Text = item.Source;
-            row.Original.Foreground = string.IsNullOrEmpty(item.Translation) ? Foreground : Muted;
-            row.Translation.Visibility = sourceOnlySession || split ? Visibility.Collapsed : Visibility.Visible;
-            row.Translation.ToolTip = item.SourceFinal && item.TranslationFinal ? null : T("字幕更新中", "Caption may change");
-            row.Translation.Text = item.Translation switch
-            {
-                null => T("正在翻译…", "Translating…"),
-                "" => T("未生成译文", "Translation unavailable"),
-                _ => item.Translation
-            };
-            row.Translation.Foreground = string.IsNullOrEmpty(item.Translation) ? Muted : Foreground;
-            row.Original.Visibility = !split && ShowOriginal(item, showSource.IsChecked == true)
-                ? Visibility.Visible : Visibility.Collapsed;
-            if (split) RenderReviewTurns(row.Turns, item, showSource.IsChecked == true);
-        }
         if (follow) history.ScrollToEnd();
+    }
+
+    private static TranslationCaption[] DisplayedRows(TranslationCaption item) =>
+        item.ReviewTurns.Length == 0 ? [item] : item.ReviewTurns;
+
+    private CaptionRow CreateCaptionRow(TranslationCaption item)
+    {
+        var options = ConfigurationStore.Shared.Configuration.Translation;
+        var original = new TextBlock
+        {
+            Text = item.Source, TextWrapping = TextWrapping.Wrap,
+            FontSize = options.SelectedSourceFontSize, Foreground = Muted, Margin = new Thickness(0, 0, 0, 3)
+        };
+        var translation = new TextBlock
+        {
+            FontSize = options.SelectedTargetFontSize, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap
+        };
+        var origin = new TextBlock
+        {
+            Text = SourceLabel(item),
+            FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center
+        };
+        var editing = new TextBlock
+        {
+            Text = T("编辑中", "Editing"), FontSize = 11, Foreground = Accent, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(5, 0, 0, 0), Visibility = Visibility.Collapsed
+        };
+        var speaker = CreateSpeakerLabel(editing);
+        var time = new TextBlock
+        {
+            FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(9, 0, 0, 0), ToolTip = T("这段音频的起止时间", "Start and end time of this passage")
+        };
+        Typography.SetNumeralAlignment(time, FontNumeralAlignment.Tabular);
+        var review = new TextBlock
+        {
+            FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0)
+        };
+        var cache = new TextBlock
+        {
+            FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(9, 0, 0, 0),
+            ToolTip = T("本次翻译复用的输入 token 比例", "Share of prompt tokens reused for this translation")
+        };
+        Typography.SetNumeralAlignment(cache, FontNumeralAlignment.Tabular);
+        var attribution = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        attribution.Children.Add(origin);
+        attribution.Children.Add(speaker);
+        attribution.Children.Add(editing);
+        var reviewedTime = new StackPanel { Orientation = Orientation.Horizontal };
+        reviewedTime.Children.Add(time);
+        reviewedTime.Children.Add(review);
+        attribution.Children.Add(reviewedTime);
+        attribution.Children.Add(cache);
+        var card = new StackPanel();
+        card.Children.Add(original);
+        card.Children.Add(translation);
+        card.Children.Add(attribution);
+        var border = new Border
+        {
+            Child = card, Padding = new Thickness(13, 10, 13, 10),
+            Background = Brushes.Transparent, BorderBrush = Line,
+            BorderThickness = new Thickness(0, 0, 0, 1), CornerRadius = new CornerRadius(6)
+        };
+        return new CaptionRow(border, original, translation, speaker, time, review, cache);
+    }
+
+    private void UpdateCaptionRow(CaptionRow row, TranslationCaption item)
+    {
+        if (item.SpeakerWithinParagraph)
+        {
+            row.Speaker.Tag = 0;
+            row.Speaker.Visibility = Visibility.Visible;
+            row.Speaker.Text = ScopedSpeakerName(item.SpeakerId);
+            row.Speaker.Cursor = Cursors.Arrow;
+            row.Speaker.ToolTip = T("说话人编号仅在本段复核内有效", "Speaker numbers apply within this reviewed passage");
+        }
+        else if (row.Speaker.IsReadOnly)
+        {
+            row.Speaker.Tag = item.SpeakerId;
+            bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0;
+            row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
+            row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
+            row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
+            row.Speaker.ToolTip = unknown
+                ? T("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably")
+                : T("双击修改说话人姓名", "Double-click to rename the speaker");
+        }
+        row.Time.Text = item.TimeRange;
+        row.Review.Visibility = item.Review == CaptionReview.None ? Visibility.Collapsed : Visibility.Visible;
+        row.Review.Foreground = item.Review is CaptionReview.Revised or CaptionReview.MossReviewed ? Accent : Muted;
+        row.Review.Text = item.Review switch
+        {
+            CaptionReview.Pending => T("复核中", "Reviewing"),
+            CaptionReview.Kept => T("已复核 · 保留原文", "Reviewed · Original kept"),
+            CaptionReview.Revised => T("已修正", "Revised"),
+            CaptionReview.MossReviewed => T("MOSS 已复核", "Reviewed by MOSS"),
+            CaptionReview.Disabled => T("未复核 · 功能已关闭", "Not reviewed · Disabled"),
+            CaptionReview.ModelMissing => T("未复核 · 缺少所选复核模型", "Not reviewed · Selected review model missing"),
+            CaptionReview.LanguageUnsupported => T("未复核 · 源语言不支持", "Not reviewed · Unsupported source language"),
+            CaptionReview.ModelPreparing => T("未复核 · 模型正在准备", "Not reviewed · Model preparing"),
+            CaptionReview.ModelFailed => T("未复核 · 模型加载失败", "Not reviewed · Model failed to load"),
+            CaptionReview.NoReviewableText => T("未复核 · 无可复核文字", "Not reviewed · No reviewable text"),
+            CaptionReview.AudioUnaligned => T("未复核 · 音频边界不明确", "Not reviewed · Unclear audio boundaries"),
+            CaptionReview.OutsideLimits => T("未复核 · 段落长度超出范围", "Not reviewed · Passage length out of range"),
+            CaptionReview.QueueFull => T("未复核 · 队列已满", "Not reviewed · Queue full"),
+            CaptionReview.Unavailable => T("未复核 · 状态不可用", "Not reviewed · Status unavailable"),
+            _ => ""
+        };
+        row.Cache.Visibility = item.CacheHitPercent.HasValue ? Visibility.Visible : Visibility.Collapsed;
+        row.Cache.Text = item.CacheHitPercent is int percent ? T($"缓存命中 {percent}%", $"Cache hit {percent}%") : "";
+        row.Original.Text = item.Source;
+        row.Original.Foreground = string.IsNullOrEmpty(item.Translation) ? Foreground : Muted;
+        row.Translation.Visibility = sourceOnlySession ? Visibility.Collapsed : Visibility.Visible;
+        row.Translation.ToolTip = item.SourceFinal && item.TranslationFinal ? null : T("字幕更新中", "Caption may change");
+        row.Translation.Text = item.Translation switch
+        {
+            null => T("正在翻译…", "Translating…"),
+            "" => T("未生成译文", "Translation unavailable"),
+            _ => item.Translation
+        };
+        row.Translation.Foreground = string.IsNullOrEmpty(item.Translation) ? Muted : Foreground;
+        row.Original.Visibility = ShowOriginal(item, showSource.IsChecked == true)
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ResetTranscript()
@@ -857,7 +891,7 @@ internal sealed class TranslationWindow : Window
             string name = label.Text.Trim();
             if (name.Length == 0) speakerNames.Remove(id);
             else speakerNames[id] = name;
-            foreach (var row in visibleRows.Values)
+            foreach (var row in visibleRows.Values.SelectMany(rows => rows))
             {
                 if (row.Speaker != label && row.Speaker.Tag is int other && other == id && row.Speaker.IsReadOnly)
                     row.Speaker.Text = SpeakerName(id);
@@ -902,10 +936,8 @@ internal sealed class TranslationWindow : Window
                 config.Translation.TargetFontSize = translation;
             });
         }
-        foreach (var (id, row) in visibleRows)
+        foreach (var row in visibleRows.Values.SelectMany(rows => rows))
         {
-            var item = transcript[id - clearedThroughCaption - 1];
-            if (item.ReviewTurns.Length != 0) RenderReviewTurns(row.Turns, item, showSource.IsChecked == true);
             row.Original.FontSize = original;
             row.Translation.FontSize = translation;
         }
@@ -913,53 +945,16 @@ internal sealed class TranslationWindow : Window
 
     private void UpdateOriginals(bool visible)
     {
-        foreach (var (id, row) in visibleRows)
+        foreach (var (id, rows) in visibleRows)
         {
-            var item = transcript[id - clearedThroughCaption - 1];
-            if (item.ReviewTurns.Length != 0) RenderReviewTurns(row.Turns, item, visible);
-            else row.Original.Visibility = ShowOriginal(item, visible) ? Visibility.Visible : Visibility.Collapsed;
+            var items = DisplayedRows(transcript[id - clearedThroughCaption - 1]);
+            for (int index = 0; index < rows.Length; index++)
+                rows[index].Original.Visibility = ShowOriginal(items[index], visible) ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
     private string ScopedSpeakerName(int speaker) => speaker > 0
         ? T($"本段说话人 {speaker}", $"Passage speaker {speaker}") : T("说话人待确认", "Speaker unconfirmed");
-
-    private void RenderReviewTurns(StackPanel panel, TranslationCaption item, bool showOriginal)
-    {
-        var options = ConfigurationStore.Shared.Configuration.Translation;
-        panel.Children.Clear();
-        panel.Visibility = Visibility.Visible;
-        foreach (var turn in item.ReviewTurns)
-        {
-            var label = new TextBlock
-            {
-                Text = $"{ScopedSpeakerName(turn.SpeakerId)} · {turn.TimeRange}", FontSize = 11, Foreground = Muted,
-                ToolTip = T("说话人编号仅在本段复核内有效", "Speaker numbers apply within this reviewed passage"),
-                Margin = new Thickness(0, 4, 0, 3), TextWrapping = TextWrapping.Wrap
-            };
-            Typography.SetNumeralAlignment(label, FontNumeralAlignment.Tabular);
-            panel.Children.Add(label);
-            if (ShowOriginal(turn, showOriginal))
-                panel.Children.Add(new TextBlock
-                {
-                    Text = turn.Source, FontSize = options.SelectedSourceFontSize, TextWrapping = TextWrapping.Wrap,
-                    Foreground = string.IsNullOrEmpty(turn.Translation) ? Foreground : Muted
-                });
-            if (sourceOnlySession) continue;
-            panel.Children.Add(new TextBlock
-            {
-                Text = turn.Translation switch
-                {
-                    null when !item.TranslationFinal => T("正在翻译…", "Translating…"),
-                    null or "" => T("未生成译文", "Translation unavailable"),
-                    _ => turn.Translation
-                },
-                FontSize = options.SelectedTargetFontSize, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap,
-                Foreground = string.IsNullOrEmpty(turn.Translation) ? Muted : Foreground
-            });
-        }
-        panel.Children.Add(new Border { Height = 1, Background = Line, Margin = new Thickness(0, 7, 0, 2) });
-    }
 
     private string SourceLabel(TranslationCaption item) => fileSession ? T("导入音频", "Imported audio")
         : item.Microphone ? T("麦克风", "Microphone") : T("电脑声音", "System audio");

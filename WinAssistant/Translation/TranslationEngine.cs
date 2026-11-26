@@ -32,7 +32,7 @@ internal sealed record TranslationCaption(int Id, bool Microphone, string Source
             string source = fields[3].Trim();
             if (source.Any(char.IsLetterOrDigit))
                 turns.Add(new TranslationCaption(turns.Count, Microphone, source, null, TranslationFinal: false,
-                    SpeakerId: speaker, StartMs: start, EndMs: end) { SpeakerWithinParagraph = true });
+                    SpeakerId: speaker, StartMs: start, EndMs: end, Review: CaptionReview.MossReviewed) { SpeakerWithinParagraph = true });
         }
         var merged = new List<TranslationCaption>();
         foreach (var turn in turns.OrderBy(turn => turn.StartMs))

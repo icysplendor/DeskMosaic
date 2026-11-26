@@ -406,7 +406,7 @@ struct TranslationCaption: Identifiable, Equatable {
             guard text.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
             turns.append(TranslationCaption(id: turns.count, microphone: microphone, source: text,
                 translation: nil, translationFinal: false, speakerID: speaker, startMs: start, endMs: end,
-                speakerWithinParagraph: true))
+                review: .mossReviewed, speakerWithinParagraph: true))
         }
         var merged: [TranslationCaption] = []
         for turn in turns.sorted(by: { ($0.startMs, $0.id) < ($1.startMs, $1.id) }) {

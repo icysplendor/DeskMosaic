@@ -362,13 +362,11 @@ internal static class StreamingRecognition
                                 revised ? CaptionReview.Revised : CaptionReview.Kept
                         };
                         if (kind[0] == 'G' && original.MossTurns(rawSource) is { Length: > 0 } turns)
-                            corrected = corrected with { Review = CaptionReview.MossReviewed, ReviewTurns = turns,
-                                StartMs = turns[0].StartMs, EndMs = turns.Max(turn => turn.EndMs),
-                                Translation = null, CacheHitPercent = null };
+                            corrected = corrected with { Review = CaptionReview.MossReviewed, ReviewTurns = turns };
                         if (accepted)
                             corrected = corrected with { Source = source, StartMs = startMs, EndMs = endMs };
                         Log($"paragraph id={corrected.Id} range_ms={startMs}-{endMs} review={corrected.Review}");
-                        caption(corrected);
+                        if (translationReady is null || corrected.ReviewTurns.Length == 0) caption(corrected);
                         if (translationReady is not null) QueueFinal(corrected);
                         signal.Writer.TryWrite(true);
                         continue;
@@ -423,12 +421,16 @@ internal static class StreamingRecognition
             if (pendingFinals.Count == 256)
             {
                 var dropped = pendingFinals.Dequeue();
-                if (string.IsNullOrEmpty(dropped.Translation))
+                if (dropped.ReviewTurns.Length != 0) caption(KeepOriginal(dropped));
+                else if (string.IsNullOrEmpty(dropped.Translation))
                     caption(dropped with { Translation = "", TranslationFinal = true });
             }
             pendingFinals.Enqueue(item);
             draftRequest?.Cancel();
         }
+
+        static TranslationCaption KeepOriginal(TranslationCaption item) =>
+            item with { ReviewTurns = [], Review = CaptionReview.Kept, Translation = item.Translation ?? "" };
 
         async Task Translate(Func<Task> readyToTranslate)
         {
@@ -475,17 +477,24 @@ internal static class StreamingRecognition
                 {
                     if (final.ReviewTurns.Length != 0)
                     {
-                        var turns = new TranslationCaption[final.ReviewTurns.Length];
-                        for (int index = 0; index < turns.Length; index++)
+                        var turns = new List<TranslationCaption>(final.ReviewTurns.Length);
+                        foreach (var turn in final.ReviewTurns)
                         {
-                            var turn = final.ReviewTurns[index];
                             var translated = await TranslateSafely(turn.Source, provisional: false, _ => { }, active);
                             active.ThrowIfCancellationRequested();
-                            turns[index] = turn with { Translation = translated.Text, TranslationFinal = true };
+                            if (string.IsNullOrWhiteSpace(translated.Text)) break;
+                            turns.Add(turn with { Translation = translated.Text, TranslationFinal = true,
+                                CacheHitPercent = translated.CacheHitPercent });
                         }
-                        lock (state) caption(final with { ReviewTurns = turns, TranslationFinal = true,
-                            Translation = string.Join("\n", turns.Select(turn => turn.Translation).Where(text => !string.IsNullOrEmpty(text))) });
-                        continue;
+                        if (turns.Count == final.ReviewTurns.Length)
+                        {
+                            lock (state) caption(final with { ReviewTurns = turns.ToArray(), TranslationFinal = true,
+                                Translation = string.Join("\n", turns.Select(turn => turn.Translation)) });
+                            continue;
+                        }
+                        final = KeepOriginal(final);
+                        lock (state) caption(final);
+                        if (!string.IsNullOrEmpty(final.Translation)) continue;
                     }
                     var result = await TranslateSafely(final.Source, provisional: false, _ => { }, active);
                     active.ThrowIfCancellationRequested();
