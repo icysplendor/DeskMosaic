@@ -796,12 +796,6 @@ private struct TranslationWindowView: View {
                     Text(captionReviewLabel(review))
                         .foregroundStyle(review == .revised || review == .mossReviewed ? accent : Color.secondary)
                 }
-                if let percent = caption.cacheHitPercent {
-                    Text(t("缓存命中 \(percent)%", "Cache hit \(percent)%"))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .help(t("本次翻译复用的输入 token 比例", "Share of prompt tokens reused for this translation"))
-                }
             }
             .font(.system(size: 11))
         }

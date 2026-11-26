@@ -17,6 +17,7 @@ typedef struct {
   float *samples;
   uint32_t rate;
   size_t total;
+  size_t queued_through;
   double origin;
 } CorrectionAudio;
 
@@ -522,13 +523,17 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
   if (end <= begin) return CorrectionAudioUnaligned;
   if (length >= CorrectionTextBytes || end - begin > CorrectionMaxSeconds || (!correction->moss && end - begin < CorrectionShortSeconds))
     return CorrectionOutsideLimits;
-  const CorrectionAudio *audio = &correction->audio[source];
+  CorrectionAudio *audio = &correction->audio[source];
   if (!audio->samples || begin < audio->origin) return CorrectionAudioUnaligned;
   size_t offset = (size_t)((begin - audio->origin) * audio->rate);
   size_t tail = (size_t)((end - audio->origin) * audio->rate);
   if (tail > audio->total) tail = audio->total;
+  // Later recognition updates can move the estimated cut into the preceding clip.
+  if (offset < audio->queued_through) offset = audio->queued_through;
   size_t capacity = (size_t)audio->rate * CorrectionAudioSeconds;
   if (offset >= tail || audio->total - offset > capacity) return CorrectionAudioUnaligned;
+  size_t count = tail - offset;
+  if (!correction->moss && count / (double)audio->rate < CorrectionShortSeconds) return CorrectionOutsideLimits;
 
   diar_lock(&correction->lock);
   if (correction->state == CorrectionUnavailable || correction->queued == CorrectionQueueSize) {
@@ -536,7 +541,6 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
     diar_unlock(&correction->lock);
     return reason;
   }
-  size_t count = tail - offset;
   CorrectionJob *job = malloc(sizeof(*job) + count * sizeof(float));
   if (!job) { diar_unlock(&correction->lock); return CorrectionAudioUnaligned; }
   size_t index = offset % capacity;
@@ -557,6 +561,7 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
   job->original[length] = 0;
   correction->jobs[(correction->head + correction->queued) % CorrectionQueueSize] = job;
   ++correction->queued;
+  audio->queued_through = tail;
   emit_caption(source, 'F', job->id, speaker, range, text, length);
   fflush(stdout);
   diar_signal(&correction->event);

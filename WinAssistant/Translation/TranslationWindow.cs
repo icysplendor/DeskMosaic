@@ -50,7 +50,7 @@ internal sealed class TranslationWindow : Window
     private readonly Button export = new() { IsEnabled = false };
     private readonly List<TranslationCaption> transcript = new();
     private sealed record CaptionRow(Border Card, TextBlock Original, TextBlock Translation, TextBox Speaker,
-        TextBlock Time, TextBlock Review, TextBlock Cache);
+        TextBlock Time, TextBlock Review);
 
     private readonly Dictionary<int, CaptionRow[]> visibleRows = new();
     private readonly Dictionary<int, string> speakerNames = new();
@@ -724,13 +724,6 @@ internal sealed class TranslationWindow : Window
         {
             FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(9, 0, 0, 0)
         };
-        var cache = new TextBlock
-        {
-            FontSize = 11, Foreground = Muted, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(9, 0, 0, 0),
-            ToolTip = T("本次翻译复用的输入 token 比例", "Share of prompt tokens reused for this translation")
-        };
-        Typography.SetNumeralAlignment(cache, FontNumeralAlignment.Tabular);
         var attribution = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
         attribution.Children.Add(origin);
         attribution.Children.Add(speaker);
@@ -739,7 +732,6 @@ internal sealed class TranslationWindow : Window
         reviewedTime.Children.Add(time);
         reviewedTime.Children.Add(review);
         attribution.Children.Add(reviewedTime);
-        attribution.Children.Add(cache);
         var card = new StackPanel();
         card.Children.Add(original);
         card.Children.Add(translation);
@@ -750,7 +742,7 @@ internal sealed class TranslationWindow : Window
             Background = Brushes.Transparent, BorderBrush = Line,
             BorderThickness = new Thickness(0, 0, 0, 1), CornerRadius = new CornerRadius(6)
         };
-        return new CaptionRow(border, original, translation, speaker, time, review, cache);
+        return new CaptionRow(border, original, translation, speaker, time, review);
     }
 
     private void UpdateCaptionRow(CaptionRow row, TranslationCaption item)
@@ -796,8 +788,6 @@ internal sealed class TranslationWindow : Window
             CaptionReview.Unavailable => T("未复核 · 状态不可用", "Not reviewed · Status unavailable"),
             _ => ""
         };
-        row.Cache.Visibility = item.CacheHitPercent.HasValue ? Visibility.Visible : Visibility.Collapsed;
-        row.Cache.Text = item.CacheHitPercent is int percent ? T($"缓存命中 {percent}%", $"Cache hit {percent}%") : "";
         row.Original.Text = item.Source;
         row.Original.Foreground = string.IsNullOrEmpty(item.Translation) ? Foreground : Muted;
         row.Translation.Visibility = sourceOnlySession ? Visibility.Collapsed : Visibility.Visible;
