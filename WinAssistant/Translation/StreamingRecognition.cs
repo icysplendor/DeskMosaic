@@ -174,7 +174,7 @@ internal static class StreamingRecognition
         {
             string executable = await runtime.WaitAsync(active);
             var model = await PrepareModel(speechModel, archive, active, Log);
-            string[] arguments = await RecognitionArguments(options, model, active);
+            string[] arguments = await RecognitionArguments(options, model, active, useStreamingSpeakers: !mossReview);
             string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
             if (correctionDirectory is not null)
                 arguments = [.. arguments, "--correction", correctionDirectory];
@@ -671,9 +671,9 @@ internal static class StreamingRecognition
         return installed;
     }
 
-    private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token)
+    private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token, bool useStreamingSpeakers = true)
     {
-        string speaker = options.SelectedSpeakerModel;
+        string speaker = useStreamingSpeakers ? options.SelectedSpeakerModel : "";
         if (speaker.Length == 0) return ["1", "-"];
 
         const string speakerFile = "speaker.gguf";

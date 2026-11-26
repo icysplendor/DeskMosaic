@@ -149,7 +149,8 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
+        let mossReview = file == nil && options.enableCorrection && options.usesMossReview && !options.selectedMossModel.isEmpty
+        identifiesSpeakers = !mossReview && !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true

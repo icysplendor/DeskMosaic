@@ -212,7 +212,7 @@ final class StreamingRecognition {
         }
 
         let (model, arguments) = try await prepareRecognition(options: options, model: model, archive: archive,
-                                                              diagnostic: diagnostic)
+                                                              diagnostic: diagnostic, useStreamingSpeakers: !mossReview)
         let helper = Process()
         helper.executableURL = helperURL
         helper.currentDirectoryURL = model
@@ -607,8 +607,8 @@ final class StreamingRecognition {
     }
 
     private func prepareRecognition(options: TranslationOptions, model: StreamingSpeechModel, archive: String,
-                                    diagnostic: TranslationDiagnosticLog?) async throws -> (URL, [String]) {
-        let speaker = options.selectedSpeakerModel
+                                    diagnostic: TranslationDiagnosticLog?, useStreamingSpeakers: Bool = true) async throws -> (URL, [String]) {
+        let speaker = useStreamingSpeakers ? options.selectedSpeakerModel : ""
         let speakerFile = "speaker.gguf"
         let preparation = Task.detached {
             let directory = try Self.prepareModel(model, archive: archive, diagnostic: diagnostic)

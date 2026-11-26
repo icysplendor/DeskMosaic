@@ -534,7 +534,7 @@ internal sealed class TranslationWindow : Window
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = input is null && options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;

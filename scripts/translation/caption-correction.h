@@ -12,6 +12,7 @@
 
 enum { CorrectionPathBytes = 4096 };
 enum { CorrectionAudioSeconds = 36, CorrectionMaxSeconds = 30, CorrectionQueueSize = 2, CorrectionTextBytes = 8192 };
+static const double CorrectionShortSeconds = 0.6;
 typedef struct {
   float *samples;
   uint32_t rate;
@@ -182,11 +183,17 @@ static void correction_publish_moss(MossReview *review, const CorrectionJob *job
   long long base = llround(job->audio_start * 1000);
   long long duration = llround(job->count * 1000.0 / job->rate);
   int turns = review->api.n_segments(review->session);
+  int short_audio = job->count / (double)job->rate < CorrectionShortSeconds;
+  if (short_audio && turns != 1) turns = 0;
   for (int i = 0; i < turns; ++i) {
     struct transcribe_segment segment;
     review->api.segment_init(&segment);
     if (review->api.get_segment(review->session, i, &segment) != TRANSCRIBE_OK ||
         !segment.text || !*segment.text) continue;
+    // Very short audio can produce an unrelated word. Keep the streaming
+    // result when the second pass cannot corroborate the short utterance.
+    if (short_audio && (!accepts_revision(job->original, segment.text) ||
+        !preserves_edges(job->original, segment.text))) continue;
     long long start = (long long)fmin(duration, fmax(0, segment.t0_ms));
     long long end = (long long)fmin(duration, fmax(start, segment.t1_ms));
     if (end <= start) continue;
@@ -413,7 +420,7 @@ static enum CorrectionSkip correction_offer(CaptionCorrection *correction, uint3
   if (!correction->started) return CorrectionModelFailed;
   if (!correction->moss && !reviewable_text(text, length)) return CorrectionNoReviewableText;
   if (end <= begin) return CorrectionAudioUnaligned;
-  if (length >= CorrectionTextBytes || end - begin > CorrectionMaxSeconds || end - begin < 0.6)
+  if (length >= CorrectionTextBytes || end - begin > CorrectionMaxSeconds || (!correction->moss && end - begin < CorrectionShortSeconds))
     return CorrectionOutsideLimits;
   const CorrectionAudio *audio = &correction->audio[source];
   if (!audio->samples || begin < audio->origin) return CorrectionAudioUnaligned;
