@@ -149,8 +149,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
         options.twoWay = twoWay
         twoWaySession = twoWay
         sourceOnlySession = options.transcribeOnly
-        let mossReview = file == nil && options.enableCorrection && options.usesMossReview && !options.selectedMossModel.isEmpty
-        identifiesSpeakers = !mossReview && !options.selectedSpeakerModel.isEmpty
+        identifiesSpeakers = !options.selectedSpeakerModel.isEmpty
         let engine = TranslationEngine()
         self.engine = engine
         running = true
@@ -269,7 +268,7 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
                     "\($0.components(separatedBy: .newlines).joined(separator: " ")) (\(speakerID))"
                 } ?? speakerID
                 heading += " · " + speaker
-            } else if identifiesSpeakers {
+            } else if identifiesSpeakers && item.turnSources.isEmpty {
                 heading += " · " + t("说话人待确认", "Speaker unconfirmed")
             }
             heading += " · " + item.timeRange
@@ -761,7 +760,7 @@ private struct TranslationWindowView: View {
                                     help: t("双击修改说话人姓名", "Double-click to rename the speaker"),
                                     editingLabel: t("编辑中", "Editing"))
                         .id(caption.speakerID)
-                } else if controller.identifiesSpeakers && caption.sourceFinal {
+                } else if controller.identifiesSpeakers && caption.sourceFinal && caption.turnSources.isEmpty {
                     Text(t("说话人待确认", "Speaker unconfirmed"))
                         .foregroundStyle(.secondary)
                         .help(t("这句话的声音不足以可靠区分说话人", "This phrase cannot be assigned to a speaker reliably"))

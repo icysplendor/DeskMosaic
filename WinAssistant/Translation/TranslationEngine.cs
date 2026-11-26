@@ -18,7 +18,24 @@ internal enum CaptionReview
 internal sealed record TranslationCaption(int Id, bool Microphone, string Source, string? Translation, bool SourceFinal = true, bool TranslationFinal = true, int SpeakerId = 0, long StartMs = 0, long EndMs = 0, CaptionReview Review = CaptionReview.None, int? CacheHitPercent = null)
 {
     internal TranslationCaption[] ReviewTurns { get; init; } = [];
+    internal string[] TurnSources { get; init; } = [];
     internal bool SpeakerWithinParagraph { get; init; }
+
+    internal static string[] SplitTurns(string source, int[] offsets)
+    {
+        if (offsets.Length == 0) return [];
+        byte[] bytes = Encoding.UTF8.GetBytes(source);
+        var turns = new List<string>();
+        int start = 0;
+        foreach (int end in offsets.Append(bytes.Length))
+        {
+            if (end <= start || end > bytes.Length || end < bytes.Length && (bytes[end] & 0xC0) == 0x80) return [];
+            string text = Encoding.UTF8.GetString(bytes, start, end - start).Trim();
+            if (text.Any(char.IsLetterOrDigit)) turns.Add(text);
+            start = end;
+        }
+        return turns.Count > 1 ? turns.ToArray() : [];
+    }
 
     internal TranslationCaption[] MossTurns(string payload)
     {

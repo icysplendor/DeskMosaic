@@ -3,6 +3,7 @@
  * 0[<bytes>] = draft with optional stable sentence prefix in UTF-8 bytes,
  * 1 = final, F<id> = final with a pending revision, R<id> = revision
  * (empty text retains the original); G<id> carries reviewed speaker turns.
+ * T carries UTF-8 turn offsets for the next draft or final on that source.
  * Pipes keep audio and recognition local to the parent process.
  */
 #include <math.h>
@@ -30,6 +31,8 @@ typedef void *NativeLibrary;
 #include "wave-recorder.h"
 #include "online-diarization.h"
 #include "moss-asr.h"
+#include <errno.h>
+#include "moss-review-process.h"
 #include "caption-correction.h"
 #include "diarized-caption.h"
 #include "microphone-vad.h"
@@ -154,6 +157,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   startup_diagnostic("speech_library_loaded");
+  if (argc == 3 && strcmp(argv[1], "--moss-worker") == 0) return moss_worker_main(library);
   if (checking_vad) {
     MicrophoneVad vad = load_microphone_vad(library);
     microphone_vad_start(&vad, argv[3], 0.35f);
@@ -178,10 +182,13 @@ int main(int argc, char **argv) {
   LOAD(OnlineStreamInputFinished);
 
   const char *moss_review = getenv("ASSISTANT_MOSS_REVIEW");
+#ifndef _WIN32
+  if (moss_review && *moss_review) signal(SIGPIPE, SIG_IGN);
+#endif
   CaptionCorrection correction = {
       .moss = moss_review && *moss_review,
-      .cpu = moss_review && strcmp(moss_review, "cpu") == 0,
-      .sherpa = library,
+      .program = argv[0],
+      .sherpa_path = argv[2],
       .directory = correction_directory,
       .CreateOnlineRecognizer = CreateOnlineRecognizer,
       .DestroyOnlineRecognizer = DestroyOnlineRecognizer,
@@ -232,6 +239,7 @@ int main(int argc, char **argv) {
   }
 
   int file_transcription = getenv("ASSISTANT_FILE_TRANSCRIPTION") != NULL;
+  correction.live_turns = online_speakers && !file_transcription;
   const char *mic_mode = getenv("ASSISTANT_MIC_VAD");
   const char *mic_pause = getenv("ASSISTANT_MIC_PAUSE");
   const char *vad_model = getenv("ASSISTANT_MIC_VAD_MODEL");

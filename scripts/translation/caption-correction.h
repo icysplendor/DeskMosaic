@@ -46,8 +46,8 @@ typedef struct {
   ONLINE_CORRECTION_API(GetOnlineStreamResult);
   ONLINE_CORRECTION_API(DestroyOnlineRecognizerResult);
   const char *directory;
-  NativeLibrary sherpa;
-  int moss, cpu;
+  const char *program, *sherpa_path;
+  int moss, live_turns;
   DiarMutex lock;
   DiarCondition event;
   DiarThread worker;
@@ -171,14 +171,10 @@ static void correction_diagnostic(const char *stage) {
 
 // One line replaces the parent caption atomically. ASCII separators are
 // reserved for the turn metadata and stripped from model-generated text.
-static void correction_publish_moss(MossReview *review, const CorrectionJob *job) {
-  int ok = moss_review_decode(review, job->samples, (uint32_t)job->count, job->rate);
-  if (!ok) {
-    correction_diagnostic("moss_inference_failed");
-    emit_caption(job->source, 'R', job->id, job->speaker, job->range, "", 0);
-    return;
-  }
-  char payload[32768];
+enum { MossReplyBytes = 32768 };
+
+static int32_t correction_decode_moss(MossReview *review, const CorrectionJob *job, char *payload) {
+  if (!moss_review_decode(review, job->samples, (uint32_t)job->count, job->rate)) return -1;
   size_t used = 0;
   long long base = llround(job->audio_start * 1000);
   long long duration = llround(job->count * 1000.0 / job->rate);
@@ -197,11 +193,11 @@ static void correction_publish_moss(MossReview *review, const CorrectionJob *job
     long long start = (long long)fmin(duration, fmax(0, segment.t0_ms));
     long long end = (long long)fmin(duration, fmax(start, segment.t1_ms));
     if (end <= start) continue;
-    int header = snprintf(payload + used, sizeof(payload) - used, "%s%d\x1f%lld\x1f%lld\x1f",
+    int header = snprintf(payload + used, MossReplyBytes - used, "%s%d\x1f%lld\x1f%lld\x1f",
                           used ? "\x1e" : "", segment.speaker_id, base + start, base + end);
     size_t length = strlen(segment.text);
-    if (header < 0 || (size_t)header >= sizeof(payload) - used ||
-        length >= sizeof(payload) - used - (size_t)header) {
+    if (header < 0 || (size_t)header >= MossReplyBytes - used ||
+        length >= MossReplyBytes - used - (size_t)header) {
       used = 0;
       break;
     }
@@ -209,7 +205,46 @@ static void correction_publish_moss(MossReview *review, const CorrectionJob *job
     for (size_t j = 0; j < length; ++j)
       payload[used++] = (unsigned char)segment.text[j] < 32 ? ' ' : segment.text[j];
   }
-  emit_caption(job->source, used ? 'G' : 'R', job->id, job->speaker, job->range, used ? payload : "", used);
+  return (int32_t)used;
+}
+
+static int moss_worker_main(NativeLibrary sherpa) {
+  MossReview review = {0};
+  const char *mode = getenv("ASSISTANT_MOSS_REVIEW");
+  unsigned char ready = moss_review_open(&review, sherpa, mode && strcmp(mode, "cpu") == 0);
+  if (fwrite(&ready, sizeof(ready), 1, stdout) != 1 || fflush(stdout) || !ready) return 3;
+
+  CorrectionJob header;
+  char payload[MossReplyBytes];
+  while (fread(&header, sizeof(header), 1, stdin) == 1) {
+    if (header.rate < 8000 || header.rate > 384000 || !header.count ||
+        header.count > (size_t)header.rate * CorrectionMaxSeconds) break;
+    CorrectionJob *job = malloc(sizeof(*job) + header.count * sizeof(float));
+    if (!job) break;
+    *job = header;
+    int32_t size = -1;
+    if (fread(job->samples, sizeof(float), job->count, stdin) == job->count)
+      size = correction_decode_moss(&review, job, payload);
+    free(job);
+    if (fwrite(&size, sizeof(size), 1, stdout) != 1 ||
+        (size > 0 && fwrite(payload, 1, (size_t)size, stdout) != (size_t)size) || fflush(stdout)) break;
+  }
+  review.api.session_free(review.session);
+  return 0;
+}
+
+static int correction_publish_moss(MossProcess *worker, const CorrectionJob *job) {
+  char payload[MossReplyBytes];
+  int32_t size = -1;
+  int connected = fwrite(job, sizeof(*job), 1, worker->input) == 1 &&
+    fwrite(job->samples, sizeof(float), job->count, worker->input) == job->count && !fflush(worker->input) &&
+    fread(&size, sizeof(size), 1, worker->output) == 1 && size <= MossReplyBytes &&
+    (size <= 0 || fread(payload, 1, (size_t)size, worker->output) == (size_t)size);
+  if (!connected || size < 0) correction_diagnostic("moss_inference_failed");
+  size_t length = connected && size > 0 ? (size_t)size : 0;
+  emit_caption(job->source, length ? 'G' : 'R', job->id, job->speaker, job->range, length ? payload : "", length);
+  fflush(stdout);
+  return connected;
 }
 
 static DIAR_WORKER correction_worker(void *context) {
@@ -243,8 +278,8 @@ static DIAR_WORKER correction_worker(void *context) {
   config.model_config.provider = "cpu";
   config.decoding_method = "greedy_search";
   if (load) correction_diagnostic("engine_loading");
-  MossReview moss = {0};
-  int moss_ready = load && correction->moss && moss_review_open(&moss, correction->sherpa, correction->cpu);
+  MossProcess moss = {0};
+  int moss_ready = load && correction->moss && moss_process_start(&moss, correction->program, correction->sherpa_path);
   const SherpaOnnxOnlineRecognizer *recognizer = load && !correction->moss ? correction->CreateOnlineRecognizer(&config) : NULL;
   int ready = recognizer || moss_ready;
   diar_lock(&correction->lock);
@@ -259,10 +294,13 @@ static DIAR_WORKER correction_worker(void *context) {
     --correction->queued;
     diar_unlock(&correction->lock);
     if (moss_ready) {
-      correction_publish_moss(&moss, job);
-      fflush(stdout);
+      int connected = correction_publish_moss(&moss, job);
       free(job);
       diar_lock(&correction->lock);
+      if (!connected) {
+        moss_ready = ready = 0;
+        correction->state = CorrectionUnavailable;
+      }
       continue;
     }
     const SherpaOnnxOnlineStream *stream = recognizer ? correction->CreateOnlineStream(recognizer) : NULL;
@@ -296,7 +334,7 @@ static DIAR_WORKER correction_worker(void *context) {
   }
   diar_unlock(&correction->lock);
   if (recognizer) correction->DestroyOnlineRecognizer(recognizer);
-  if (moss_ready) moss.api.session_free(moss.session);
+  moss_process_close(&moss);
 #ifdef _WIN32
   return 0;
 #else

@@ -121,6 +121,7 @@ internal static class StreamingRecognition
         var state = new object();
         var drafts = new TranslationCaption?[2];
         var stableSentences = new string?[2];
+        int[][] turnOffsets = [[], []];
         var pendingFinals = new Queue<TranslationCaption>();
         var pendingCorrections = new Dictionary<int, TranslationCaption>();
         int previewInterval = options.PreviewIntervalMs;
@@ -174,7 +175,7 @@ internal static class StreamingRecognition
         {
             string executable = await runtime.WaitAsync(active);
             var model = await PrepareModel(speechModel, archive, active, Log);
-            string[] arguments = await RecognitionArguments(options, model, active, useStreamingSpeakers: !mossReview);
+            string[] arguments = await RecognitionArguments(options, model, active);
             string? correctionDirectory = correctParagraphs ? CachedModelDirectory(correction) : null;
             if (correctionDirectory is not null)
                 arguments = [.. arguments, "--correction", correctionDirectory];
@@ -328,6 +329,11 @@ internal static class StreamingRecognition
                     startMs < 0 || endMs < startMs) continue;
                 int sourceIndex = fields[0] == "1" ? 1 : 0;
                 string kind = fields[1];
+                if (kind == "T")
+                {
+                    turnOffsets[sourceIndex] = fields[5].Split(',').Select(value => int.TryParse(value, out int offset) ? offset : -1).ToArray();
+                    continue;
+                }
                 int correctionId = 0;
                 bool correctionEvent = kind.Length > 1 && (kind[0] is 'F' or 'R' or 'E' or 'G') &&
                     int.TryParse(kind.AsSpan(1), out correctionId);
@@ -354,7 +360,7 @@ internal static class StreamingRecognition
                     if (correctionEvent && kind[0] != 'F')
                     {
                         if (!pendingCorrections.Remove(correctionId, out var original)) continue;
-                        bool accepted = kind[0] == 'R' && source.Any(char.IsLetterOrDigit);
+                        bool accepted = kind[0] == 'R' && original.TurnSources.Length == 0 && source.Any(char.IsLetterOrDigit);
                         bool revised = accepted && source != original.Source;
                         var corrected = original with
                         {
@@ -372,6 +378,8 @@ internal static class StreamingRecognition
                         continue;
                     }
                     var previous = drafts[sourceIndex];
+                    var turnSources = TranslationCaption.SplitTurns(rawSource, turnOffsets[sourceIndex]);
+                    turnOffsets[sourceIndex] = [];
                     if (!source.Any(char.IsLetterOrDigit)) continue;
                     string? oldStableSentence = stableSentences[sourceIndex];
                     stableSentences[sourceIndex] = null;
@@ -382,11 +390,11 @@ internal static class StreamingRecognition
                             stableSentences[sourceIndex] = Encoding.UTF8.GetString(utf8, 0, bytes).Trim();
                     }
                     if (!final && stableSentences[sourceIndex] == oldStableSentence && source == previous?.Source &&
-                        speakerId == previous?.SpeakerId && startMs == previous?.StartMs && endMs == previous?.EndMs) continue;
+                        turnSources.SequenceEqual(previous?.TurnSources ?? []) && speakerId == previous?.SpeakerId && startMs == previous?.StartMs && endMs == previous?.EndMs) continue;
                     // A shorter final source still uses the visible preview until its replacement arrives.
                     var item = new TranslationCaption(previous?.Id ?? ++id, sourceIndex == 1, source,
                         previous?.Translation, final, false, speakerId, startMs, endMs,
-                        review, previous?.CacheHitPercent);
+                        review, previous?.CacheHitPercent) { TurnSources = turnSources };
                     drafts[sourceIndex] = final ? null : item;
                     if (final) Log($"paragraph id={item.Id} range_ms={startMs}-{endMs} review={item.Review}");
                     caption(item);
@@ -398,6 +406,8 @@ internal static class StreamingRecognition
                     else if (translationReady is not null)
                     {
                         if (final) QueueFinal(item);
+                        else if (draftInput?.Id == item.Id && !SameClosedTurns(draftInput.TurnSources, item.TurnSources))
+                            draftRequest?.Cancel();
                         else CancelStaleDraft(item);
                     }
                 }
@@ -437,6 +447,7 @@ internal static class StreamingRecognition
             await readyToTranslate().WaitAsync(active);
             var submitted = new TranslationCaption?[2];
             var completed = new TranslationCaption?[2];
+            var turnPreviews = new (int Id, Dictionary<string, TranslationResult>? Results)[2];
             while (true)
             {
                 active.ThrowIfCancellationRequested();
@@ -454,11 +465,14 @@ internal static class StreamingRecognition
                         for (int index = 0; index < drafts.Length; index++)
                         {
                             if (drafts[index] is not { } draft) continue;
-                            if (submitted[index]?.Id == draft.Id && submitted[index]?.Source == draft.Source) continue;
+                            if (submitted[index]?.Id == draft.Id && submitted[index]?.Source == draft.Source &&
+                                draft.TurnSources.SequenceEqual(submitted[index]!.TurnSources)) continue;
                             bool newSentence = stableSentences[index] is { } sentence &&
                                 (submitted[index]?.Id != draft.Id ||
                                  submitted[index]?.Source.StartsWith(sentence, StringComparison.Ordinal) != true);
-                            int remaining = newSentence ? 0 : (int)Math.Max(0, lastRequest[index] + previewInterval - now);
+                            bool newTurn = draft.TurnSources.Length != 0 &&
+                                !SameClosedTurns(draft.TurnSources, submitted[index]?.TurnSources ?? []);
+                            int remaining = newSentence || newTurn ? 0 : (int)Math.Max(0, lastRequest[index] + previewInterval - now);
                             if (remaining == 0 && (chosen == -1 || lastRequest[index] < lastRequest[chosen])) chosen = index;
                             delay = Math.Min(delay, remaining);
                         }
@@ -496,7 +510,9 @@ internal static class StreamingRecognition
                         lock (state) caption(final);
                         if (!string.IsNullOrEmpty(final.Translation)) continue;
                     }
-                    var result = await TranslateSafely(final.Source, provisional: false, _ => { }, active);
+                    var result = final.TurnSources.Length == 0
+                        ? await TranslateSafely(final.Source, provisional: false, _ => { }, active)
+                        : (await TranslateTurns(final.TurnSources, provisional: false, active)).Result;
                     active.ThrowIfCancellationRequested();
                     // On failure the visible preview stays provisional.
                     if (result.Text.Length != 0 || string.IsNullOrEmpty(final.Translation))
@@ -520,6 +536,39 @@ internal static class StreamingRecognition
                 }
 
                 using var previewLifetime = previewCancellation!;
+                if (request.TurnSources.Length != 0)
+                {
+                    completed[chosen] = null;
+                    try
+                    {
+                        var cached = turnPreviews[chosen].Id == request.Id ? turnPreviews[chosen].Results : null;
+                        var batch = await TranslateTurns(request.TurnSources, provisional: true, previewLifetime.Token, cached);
+                        turnPreviews[chosen] = (request.Id, batch.Cache);
+                        submitted[chosen] = request;
+                        lock (state)
+                        {
+                            if (!previewLifetime.IsCancellationRequested && batch.Result.Text.Length != 0 &&
+                                drafts[chosen] is { } current && current.Id == request.Id && current.TurnSources.Length != 0 &&
+                                SameClosedTurns(current.TurnSources, request.TurnSources) &&
+                                StillRepresentsSource(request.TurnSources[^1], current.TurnSources[^1]))
+                            {
+                                var updated = current with { Translation = batch.Result.Text, CacheHitPercent = batch.Result.CacheHitPercent };
+                                drafts[chosen] = updated;
+                                caption(updated);
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException) when (!active.IsCancellationRequested) { }
+                    finally
+                    {
+                        lock (state)
+                        {
+                            draftRequest = null;
+                            draftInput = null;
+                        }
+                    }
+                    continue;
+                }
                 var anchor = completed[chosen];
                 string source = request.Source;
                 if (anchor is not null && anchor.Id == request.Id &&
@@ -542,6 +591,8 @@ internal static class StreamingRecognition
                 {
                     var result = await TranslateSafely(source, provisional: true, text => Preview(text, complete: false), previewLifetime.Token);
                     submitted[chosen] = request;
+                    if (anchor is null && result.Text.Length != 0 && !previewLifetime.IsCancellationRequested)
+                        turnPreviews[chosen] = (request.Id, new() { [request.Source] = result });
                     Preview(result.Text, complete: true, cacheHitPercent: result.CacheHitPercent);
                 }
                 finally
@@ -559,7 +610,7 @@ internal static class StreamingRecognition
                     if (text.Length == 0 || previewLifetime.IsCancellationRequested) return;
                     lock (state)
                     {
-                        if (drafts[chosen] is not { } current || current.Id != request.Id) return;
+                        if (drafts[chosen] is not { } current || current.Id != request.Id || current.TurnSources.Length != 0) return;
                         draftHasOutput = true;
                         if (!complete) CancelStaleDraft(current);
                         if (!StillRepresentsSource(request.Source, current.Source)) return;
@@ -589,6 +640,29 @@ internal static class StreamingRecognition
         {
             if (!draftHasOutput || draftInput is not { } input || current.Id != input.Id) return;
             if (!StillRepresentsSource(input.Source, current.Source)) draftRequest?.Cancel();
+        }
+
+        static bool SameClosedTurns(string[] first, string[] second) =>
+            first.AsSpan(0, Math.Max(0, first.Length - 1)).SequenceEqual(second.AsSpan(0, Math.Max(0, second.Length - 1)));
+
+        async Task<(TranslationResult Result, Dictionary<string, TranslationResult> Cache)> TranslateTurns(
+            string[] turns, bool provisional, CancellationToken requestToken, Dictionary<string, TranslationResult>? cached = null)
+        {
+            var cache = new Dictionary<string, TranslationResult>();
+            var text = new StringBuilder();
+            int? cacheHit = null;
+            foreach (string turn in turns)
+            {
+                var result = cached is not null && cached.TryGetValue(turn, out var saved)
+                    ? saved : await TranslateSafely(turn, provisional, _ => { }, requestToken);
+                requestToken.ThrowIfCancellationRequested();
+                if (result.Text.Length == 0) return (new TranslationResult(""), cache);
+                cache[turn] = result;
+                if (text.Length != 0 && text[^1] is not ('。' or '！' or '？')) text.Append(' ');
+                text.Append(result.Text);
+                cacheHit = result.CacheHitPercent;
+            }
+            return (new TranslationResult(text.ToString(), cacheHit), cache);
         }
 
         async Task<TranslationResult> TranslateSafely(string source, bool provisional, Action<string> preview, CancellationToken requestToken)
@@ -671,9 +745,9 @@ internal static class StreamingRecognition
         return installed;
     }
 
-    private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token, bool useStreamingSpeakers = true)
+    private static async Task<string[]> RecognitionArguments(TranslationOptions options, string model, CancellationToken token)
     {
-        string speaker = useStreamingSpeakers ? options.SelectedSpeakerModel : "";
+        string speaker = options.SelectedSpeakerModel;
         if (speaker.Length == 0) return ["1", "-"];
 
         const string speakerFile = "speaker.gguf";

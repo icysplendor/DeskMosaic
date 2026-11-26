@@ -7,7 +7,7 @@ static const double ParagraphSilence = 3.0;
 typedef struct {
   size_t start, end, aligned_end;
   double time, last_token;
-  int phrase_start;
+  int phrase_start, speaker;
 } CaptionWord;
 
 enum { DiarizedTextBytes = 8192, DiarizedWords = 1024 };
@@ -64,7 +64,7 @@ static size_t append_caption_words(CaptionWord *words, size_t used, size_t base,
       if (index >= skipped) {
         double previous = used ? words[used - 1].time : time;
         size_t start = base + index - skipped;
-        words[used++] = (CaptionWord){start, start + width, start + width, time, time, first || time - previous >= 0.40};
+        words[used++] = (CaptionWord){start, start + width, start + width, time, time, first || time - previous >= 0.40, 0};
       }
       first = 0;
     } else if (used && index >= skipped && words[used - 1].start >= base) {
@@ -93,6 +93,27 @@ static CaptionRange caption_range(const CaptionWord *words, size_t count, size_t
   return finish >= start ? (CaptionRange){start, finish} : fallback;
 }
 
+// The preview receives text boundaries, while the caption itself still
+// follows the normal paragraph rules. Offsets are relative to its UTF-8 text.
+static int emit_caption_turns(uint32_t source, const CaptionWord *words, size_t count, size_t begin, size_t end) {
+  char offsets[DiarizedWords * 2 * 6];
+  size_t used = 0;
+  int speaker = 0, multiple = 0;
+  for (size_t i = 0; i < count; ++i) {
+    const CaptionWord *word = &words[i];
+    if (word->start < begin || word->start >= end || !word->speaker) continue;
+    if (speaker && speaker != word->speaker) {
+      multiple = 1;
+      int size = snprintf(offsets + used, sizeof(offsets) - used, "%s%zu", used ? "," : "", word->start - begin);
+      if (size < 0 || (size_t)size >= sizeof(offsets) - used) break;
+      used += (size_t)size;
+    }
+    speaker = word->speaker;
+  }
+  if (used) emit_caption(source, 'T', 0, 0, (CaptionRange){0}, offsets, used);
+  return multiple ? 0 : speaker;
+}
+
 static void finalize_caption(CaptionCorrection *correction, uint32_t source, int speaker,
                              const char *text, size_t begin, size_t end,
                              const CaptionWord *words, size_t count, CaptionRange fallback,
@@ -101,6 +122,7 @@ static void finalize_caption(CaptionCorrection *correction, uint32_t source, int
   while (begin < end && isspace((unsigned char)text[begin])) ++begin;
   if (end == begin) return;
   CaptionRange range = caption_range(words, count, begin, end, fallback);
+  if (correction->live_turns) speaker = emit_caption_turns(source, words, count, begin, end);
   if (correction->directory || correction->moss) {
     size_t first = 0;
     while (first < count && words[first].start < begin) ++first;
@@ -161,6 +183,10 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
     while (turn < timeline->count && timeline->turns[turn].start <= acoustic_time) ++turn;
     if (!turn) continue;
     const DiarTurn *change = &timeline->turns[turn - 1];
+    if (correction->live_turns) {
+      words[i].speaker = change->speaker;
+      continue;
+    }
     if (change->start < caption->speaker_onset) continue;
     if (speaker && speaker != change->speaker) {
       size_t boundary = words[i].start;
@@ -242,6 +268,7 @@ static void publish_diarized_caption(DiarizedCaption *caption, uint32_t source,
   if (start < total) {
     size_t stable_end = scored_limit < total ? scored_limit : total;
     unsigned boundary = preview_sentence_boundary(joined + start, stable_end > start ? stable_end - start : 0);
+    if (correction->live_turns) speaker = emit_caption_turns(source, words, count, start, total);
     emit_caption(source, '0', boundary, speaker, caption_range(words, count, start, total, fallback),
                  joined + start, total - start);
   }

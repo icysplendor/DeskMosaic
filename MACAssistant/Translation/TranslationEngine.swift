@@ -394,7 +394,23 @@ struct TranslationCaption: Identifiable, Equatable {
     var review: CaptionReview?
     var cacheHitPercent: Int?
     var reviewTurns: [TranslationCaption] = []
+    var turnSources: [String] = []
     var speakerWithinParagraph = false
+
+    static func splitTurns(_ source: Substring, offsets: [Int]) -> [String] {
+        guard !offsets.isEmpty else { return [] }
+        let bytes = Array(source.utf8)
+        var turns: [String] = []
+        var start = 0
+        for end in offsets + [bytes.count] {
+            guard end > start, end <= bytes.count,
+                  let value = String(bytes: bytes[start..<end], encoding: .utf8) else { return [] }
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.contains(where: { $0.isLetter || $0.isNumber }) { turns.append(text) }
+            start = end
+        }
+        return turns.count > 1 ? turns : []
+    }
 
     func mossTurns(_ payload: Substring) -> [TranslationCaption] {
         var turns: [TranslationCaption] = []

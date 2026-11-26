@@ -534,7 +534,7 @@ internal sealed class TranslationWindow : Window
         options.TranscribeOnly = transcribeOnly.IsChecked == true;
         options.TwoWay = twoWayMode;
         sourceOnlySession = options.TranscribeOnly;
-        identifiesSpeakers = input is null && options.SelectedSpeakerModel.Length != 0;
+        identifiesSpeakers = options.SelectedSpeakerModel.Length != 0;
         options.SourceLanguage = sourceLanguage.SelectedValue as string ?? options.SelectedSourceLanguage;
         options.TargetLanguage = targetLanguage.SelectedValue as string ?? options.SelectedTargetLanguage;
         clearedThroughCaption = 0;
@@ -730,7 +730,7 @@ internal sealed class TranslationWindow : Window
         else if (row.Speaker.IsReadOnly)
         {
             row.Speaker.Tag = item.SpeakerId;
-            bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0;
+            bool unknown = identifiesSpeakers && item.SourceFinal && item.SpeakerId == 0 && item.TurnSources.Length == 0;
             row.Speaker.Visibility = item.SpeakerId > 0 || unknown ? Visibility.Visible : Visibility.Collapsed;
             row.Speaker.Text = unknown ? T("说话人待确认", "Speaker unconfirmed") : SpeakerName(item.SpeakerId);
             row.Speaker.Cursor = unknown ? Cursors.Arrow : Cursors.Hand;
@@ -1005,7 +1005,7 @@ internal sealed class TranslationWindow : Window
                     ? $"{name.ReplaceLineEndings(" ")} ({speakerId})" : speakerId;
                 heading += " · " + speaker;
             }
-            else if (identifiesSpeakers)
+            else if (identifiesSpeakers && item.TurnSources.Length == 0)
             {
                 heading += " · " + T("说话人待确认", "Speaker unconfirmed");
             }
