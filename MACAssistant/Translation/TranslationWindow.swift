@@ -331,7 +331,6 @@ private struct TranslationWindowView: View {
     @EnvironmentObject private var settings: SettingsManager
     @State private var scrollPosition = CaptionScrollPosition()
     @State private var confirmingClear = false
-    @State private var showingOptions = false
 
     private enum AudioSource: Hashable {
         case none, system, microphone, both, file
@@ -376,7 +375,7 @@ private struct TranslationWindowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
                     (.system, t("电脑声音", "System audio")),
                     (.microphone, t("麦克风", "Microphone")),
@@ -384,34 +383,30 @@ private struct TranslationWindowView: View {
                     (.file, t("导入音频", "Import audio"))
                 ], placeholder: t("请选择", "Select"))
                 .disabled(controller.running)
-                languageControls
                 sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
                     .disabled(controller.fileCompleted)
                     .padding(.leading, 4)
-                if !controller.running && !controller.fileCompleted {
-                    Button(t("互译", "Two-way")) {
-                        controller.toggle(twoWay: true)
-                    }
+                Button(t("互译", "Two-way")) { controller.toggle(twoWay: true) }
                     .buttonStyle(.bordered)
-                    .disabled(!canStartTwoWay)
+                    .disabled(controller.running || controller.fileCompleted || !canStartTwoWay)
                     .help(twoWayHelp)
+                sessionOptions
+                fileControl
+                sessionStatus
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                exportMenu
+                Button { controller.openSettings() } label: {
+                    Label(t("设置", "Settings"), systemImage: "gearshape")
                 }
-                Spacer()
-                Button { showingOptions.toggle() } label: { Image(systemName: "ellipsis.circle") }
-                    .help(t("会话选项", "Session options"))
-                    .accessibilityLabel(t("会话选项", "Session options"))
-                    .popover(isPresented: $showingOptions) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            sessionOptions
-                            fileControl
-                            exportMenu
-                            Button { showingOptions = false; controller.openSettings() } label: {
-                                Label(t("设置", "Settings"), systemImage: "gearshape")
-                            }
-                        }.padding(12)
-                    }
+                .help(t("录写与翻译设置", "Transcription and translation settings"))
+                Button { confirmingClear = true } label: {
+                    Label(t("清屏", "Clear"), systemImage: "trash")
+                }
+                .help(t("清空当前字幕", "Clear current captions"))
+                .disabled(controller.captions.isEmpty)
             }
             .controlSize(.small)
+            .labelStyle(.iconOnly)
             .frame(height: 30)
             ScrollViewReader { reader in
                 ScrollView {
@@ -460,6 +455,8 @@ private struct TranslationWindowView: View {
             }
 
             HStack(spacing: 6) {
+                languageControls
+                Divider().frame(height: 16)
                 dropdown(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute), choices: [
                     ("auto", t("自动", "Automatic")), ("cpu", "CPU"), ("gpu", t("优先 GPU", "Prefer GPU"))
                 ], placeholder: t("自动", "Automatic"))
@@ -471,14 +468,6 @@ private struct TranslationWindowView: View {
                 Toggle(t("显示原文", "Show source"), isOn: settings.translationBinding(\.showSource))
                     .help(t("译文定稿后继续显示原文", "Keep the source visible after the translation is final"))
                 Spacer(minLength: 0)
-                sessionStatus
-                Button {
-                    confirmingClear = true
-                } label: {
-                    Label(t("清屏", "Clear"), systemImage: "trash")
-                }
-                .help(t("清空当前字幕", "Clear current captions"))
-                .disabled(controller.captions.isEmpty)
             }.controlSize(.small).frame(height: 30)
 
         }

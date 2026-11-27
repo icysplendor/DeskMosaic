@@ -117,13 +117,9 @@ internal sealed class TranslationWindow : Window
             Source = new Uri("pack://application:,,,/Translation/TranslationWindowStyles.xaml", UriKind.Absolute)
         });
         var root = new DockPanel { Margin = new Thickness(8, 2, 8, 2) };
-        var header = new DockPanel { Height = 36 };
-        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        DockPanel.SetDock(clear, Dock.Right);
-        header.Children.Add(clear);
-
-        DockPanel.SetDock(header, Dock.Bottom);
-        root.Children.Add(header);
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Height = 36, VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(toolbar, Dock.Bottom);
+        root.Children.Add(toolbar);
 
         foreach (var picker in new[] { audioSource, sourceLanguage, targetLanguage })
             picker.Style = (Style)Resources["CaptionPicker"];
@@ -159,10 +155,9 @@ internal sealed class TranslationWindow : Window
         status.Foreground = Muted;
         state.Children.Add(statusIndicator);
         state.Children.Add(status);
-        DockPanel.SetDock(state, Dock.Right);
+
         status.MaxWidth = 140;
-        header.Children.Add(state);
-        header.Children.Add(toolbar);
+
         audioSource.Items.Add(T("电脑声音", "System audio"));
         audioSource.Items.Add(T("麦克风", "Microphone"));
         audioSource.Items.Add(T("电脑声＋麦克风", "System + mic"));
@@ -213,23 +208,35 @@ internal sealed class TranslationWindow : Window
         AutomationProperties.SetName(targetLanguage, T("目标语言", "Target language"));
         sourceLanguage.ToolTip = T("源语言", "Source language");
         targetLanguage.ToolTip = T("目标语言", "Target language");
-        var languages = new ToolBar { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Height = 36 };
-        ToolBarTray.SetIsLocked(languages, true);
-        languages.Items.Add(audioSource);
-        languages.Items.Add(sourceLanguage);
-        languages.Items.Add(swapLanguages);
-        languages.Items.Add(targetLanguage);
+        var sessionBar = new DockPanel { Height = 36 };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        var utility = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(utility, Dock.Right);
+        sessionBar.Children.Add(utility);
+        DockPanel.SetDock(actions, Dock.Left);
+        sessionBar.Children.Add(actions);
+        state.HorizontalAlignment = HorizontalAlignment.Right;
+        sessionBar.Children.Add(state);
+        DockPanel.SetDock(sessionBar, Dock.Top);
+        root.Children.Insert(0, sessionBar);
+        actions.Children.Add(audioSource);
+        actions.Children.Add(start);
+        actions.Children.Add(twoWay);
+        toolbar.Children.Add(sourceLanguage);
+        toolbar.Children.Add(swapLanguages);
+        toolbar.Children.Add(targetLanguage);
+        toolbar.Children.Add(new Border { Width = 1, Height = 16, Background = Line, Margin = new Thickness(6, 0, 6, 0) });
         transcribeOnly.Foreground = Foreground;
         transcribeOnly.Content = T("仅记录", "Transcribe only");
         transcribeOnly.ToolTip = T("仅记录原文字幕", "Record source captions only");
         transcribeOnly.Click += (_, _) => UpdateLanguageControls();
-        languages.Items.Add(transcribeOnly);
+        actions.Children.Add(transcribeOnly);
         recordAudio.Foreground = Foreground;
         recordAudio.Content = T("录音", "Record");
         ToolTipService.SetShowOnDisabled(recordAudio, true);
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
-        languages.Items.Add(recordAudio);
+        actions.Children.Add(recordAudio);
         StyleToolbarIcon(advancedReview, "\uE73E", T("高级复核", "Advanced review"));
         advancedReview.Width = 30;
         advancedReview.Content = reviewGlyph;
@@ -248,19 +255,9 @@ internal sealed class TranslationWindow : Window
             UpdateAdvancedReview(SessionOptions());
         };
         Activated += (_, _) => UpdateAdvancedReview(SessionOptions());
-        languages.Items.Add(advancedReview);
-        start.Margin = new Thickness(10, 0, 0, 0);
-        twoWay.Margin = new Thickness(8, 0, 0, 0);
-        languages.Items.Add(start);
-        languages.Items.Add(twoWay);
-        var setup = new Border
-        {
-            Child = languages, Padding = new Thickness(0), Background = (Brush)Resources["CaptionSurface"],
-            BorderThickness = new Thickness(0)
-        };
-        DockPanel.SetDock(setup, Dock.Top);
-        root.Children.Insert(0, setup);
-
+        actions.Children.Add(advancedReview);
+        start.Margin = new Thickness(2, 0, 0, 0);
+        twoWay.Margin = new Thickness(4, 0, 0, 0);
         foreach (var picker in new[] { compute, originalSize, translationSize })
             picker.Style = (Style)Resources["CaptionPicker"];
         compute.Items.Add(new ComboBoxItem { Tag = "auto", Content = T("自动", "Automatic") });
@@ -282,8 +279,10 @@ internal sealed class TranslationWindow : Window
         AddPreference(T("原文", "Source"), T("原文字号", "Source size"), originalSize);
         AddPreference(T("译文", "Target"), T("译文字号", "Translation size"), translationSize);
         toolbar.Children.Add(showSource);
-        languages.Items.Add(export);
-        languages.Items.Add(settings);
+        utility.Children.Add(export);
+        utility.Children.Add(settings);
+        StyleToolbarIcon(clear, "\uE74D", T("清空当前字幕", "Clear current captions"));
+        utility.Children.Add(clear);
 
         var captionSurface = new Grid();
         captions.Margin = new Thickness(8);
@@ -320,15 +319,9 @@ internal sealed class TranslationWindow : Window
             field.Children.Add(picker);
             toolbar.Children.Add(field);
         }
-        fileNotice.Style = (Style)Resources["CaptionButton"];
-        fileNotice.MaxWidth = 640;
-        fileNotice.Margin = new Thickness(0, 0, 0, 8);
+        StyleToolbarIcon(fileNotice, "\uE8E5", T("更换音频文件", "Change audio file"));
         fileNotice.Click += (_, _) => ChooseAudioFile();
-        languages.Items.Add(fileNotice);
-        foreach (var option in new UIElement[] { transcribeOnly, recordAudio, advancedReview, fileNotice, export, settings })
-            ToolBar.SetOverflowMode(option, OverflowMode.Always);
-        foreach (var action in new UIElement[] { audioSource, sourceLanguage, targetLanguage, swapLanguages, start, twoWay })
-            ToolBar.SetOverflowMode(action, OverflowMode.Never);
+        actions.Children.Add(fileNotice);
         AllowDrop = true;
         PreviewDragOver += (_, args) =>
         {
@@ -374,8 +367,8 @@ internal sealed class TranslationWindow : Window
         var options = SessionOptions();
         UpdateAdvancedReview(options);
         bool twoWayReady = options.CanTranslateTwoWay;
-        twoWay.Visibility = session is null && !fileCompleted ? Visibility.Visible : Visibility.Collapsed;
-        twoWay.IsEnabled = session is null && translating && twoWayReady;
+
+        twoWay.IsEnabled = session is null && !fileCompleted && translating && twoWayReady;
         twoWay.ToolTip = !translating
             ? T("互译需要关闭「仅记录」", "Turn off Transcribe only to use two-way translation")
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
@@ -481,7 +474,7 @@ internal sealed class TranslationWindow : Window
         fileNotice.Visibility = file is null ? Visibility.Collapsed : Visibility.Visible;
         if (file is not null)
         {
-            fileNotice.Content = T("已选择 · ", "Selected · ") + Path.GetFileName(file);
+            AutomationProperties.SetName(fileNotice, T("更换音频文件", "Change audio file") + " · " + Path.GetFileName(file));
             fileNotice.ToolTip = file + "\n" + T("点击更换音频文件", "Click to choose another audio file");
         }
         if (!changed) return;
