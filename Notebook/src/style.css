@@ -176,7 +176,9 @@ aside {
   gap: 3px;
 }
 .library {
-  border: 1px solid var(--line);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
   justify-content: flex-start;
   margin-bottom: 8px;
   padding: 8px;
@@ -194,7 +196,13 @@ aside {
   background: var(--selected);
   color: var(--accent);
 }
+.navigation.active,
+#book-list button.active {
+  box-shadow: inset 3px 0 var(--accent);
+}
 .section-label {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -317,6 +325,7 @@ aside {
   margin: 4px 0 0;
 }
 .note-row time {
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--muted);
 }

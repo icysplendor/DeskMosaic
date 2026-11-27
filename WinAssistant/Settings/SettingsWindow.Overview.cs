@@ -44,7 +44,7 @@ internal sealed partial class SettingsWindow
         {
             var panel = new StackPanel();
             panel.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12) });
-            var box = WaccCard(panel, dark);
+            var box = WaccCard(panel, dark, outlined: true);
             box.MinHeight = row == 0 ? 258 : 208;
             box.Margin = new Thickness(0, 0, column + span < 3 ? 8 : 0, 8);
             Grid.SetColumn(box, column);

@@ -183,7 +183,7 @@ struct SettingsView: View {
                 Button { audio.refresh() } label: {
                     Text(t("刷新", "Refresh"))
                 }
-                .buttonStyle(WaccPrimaryButtonStyle(accent: accent))
+                .buttonStyle(WaccButtonStyle(surface: surface, line: line))
             }
         }
         .padding(.horizontal, 18)
@@ -442,7 +442,7 @@ struct SettingsView: View {
                 .foregroundStyle(active ? Color.white : Color.primary)
                 .frame(width: 68, height: 34)
                 .background(active ? accent : surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : line))
+                .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
                 .buttonStyle(DeskPlainButtonStyle())
                 .disabled(active || !outputOnline || !inputOnline)
             Button(role: .destructive) { audio.deleteProfile(id: profile.id) } label: {
@@ -454,7 +454,7 @@ struct SettingsView: View {
         .padding(.horizontal, 12)
         .frame(minHeight: 54)
         .background(active ? accent.opacity(0.1) : panel, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : line))
+        .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
     }
 
     private func compactCurrentDevice(kind: AudioDeviceKind, device: AudioDeviceInfo?) -> some View {
@@ -820,7 +820,7 @@ struct SettingsView: View {
                         .frame(width: 28, height: 28)
                         .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(DeskPlainButtonStyle())
                 .disabled(shortcut.wrappedValue == nil)
                 .accessibilityLabel(t("清除快捷键", "Clear shortcut"))
                 .help(t("清除快捷键", "Clear shortcut"))
@@ -834,7 +834,7 @@ struct SettingsView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background(panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+            .overlay(alignment: .top) { Rectangle().fill(line).frame(height: 1) }
     }
 
     private func modeSelection(for display: ConnectedDisplay) -> Binding<Int32?> {

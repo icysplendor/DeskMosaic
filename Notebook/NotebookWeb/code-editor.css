@@ -180,10 +180,11 @@
   text-transform: none;
 }
 .code-window .cm-searchMatch {
-  background: #f6c34455;
+  background: #fdf4a580;
 }
 .code-window .cm-searchMatch-selected {
-  background: #f6c34499;
+  background: #fdf4a5;
+  color: #222431;
 }
 :root {
   --syntax-keyword: #8250df;
@@ -214,7 +215,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  border-inline: 1px solid var(--line);
+  border-inline-start: 1px solid var(--line);
   padding-inline: 6px;
 }
 .code-window:has(#edit-state[data-dirty="true"]) .code-actions .primary { background: #fdf4a5; color: #222431; }

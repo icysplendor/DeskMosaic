@@ -131,8 +131,9 @@ internal sealed class TranslationWindow : Window
         swapLanguages.VerticalAlignment = VerticalAlignment.Center;
         start.Background = start.BorderBrush = Accent;
         start.Foreground = Brushes.White;
-        twoWay.Background = twoWay.BorderBrush = ColorBrush("#6642B8");
-        twoWay.Foreground = Brushes.White;
+        twoWay.Background = (Brush)Resources["CaptionSurface"];
+        twoWay.BorderBrush = Line;
+        twoWay.Foreground = Foreground;
         twoWay.Content = T("互译", "Two-way");
         ToolTipService.SetShowOnDisabled(twoWay, true);
         clear.Content = T("清屏", "Clear");
@@ -291,7 +292,7 @@ internal sealed class TranslationWindow : Window
         root.Children.Add(new Border
         {
             Background = (Brush)Resources["CaptionSurface"], BorderBrush = Line,
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = captionSurface
+            BorderThickness = new Thickness(0, 1, 0, 1), Child = captionSurface
         });
 
         void StyleToolbarIcon(Button button, string glyph, string label)

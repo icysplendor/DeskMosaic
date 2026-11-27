@@ -145,7 +145,7 @@ internal sealed partial class SettingsWindow : Window
             actions.Children.Add(language);
             if (selectedTabIndex == 0)
             {
-                var refresh = new Button { Content = T("刷新", "Refresh"), Background = Brush("#4C5872"), BorderBrush = Brush("#4C5872"), Foreground = Brushes.White };
+                var refresh = new Button { Content = T("刷新", "Refresh") };
                 refresh.Click += (_, _) => audioState?.Refresh();
                 actions.Children.Add(refresh);
             }
@@ -602,7 +602,7 @@ internal sealed partial class SettingsWindow : Window
             Child = row,
             Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : ThemeManager.IceWhite),
             BorderBrush = active ? Brush("#4C5872") : Brush(dark ? "#444754" : "#DADCE3"),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0, 0, 0, 1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 0, 10, 0),
             Margin = new Thickness(0, 0, 0, 8)
@@ -870,7 +870,11 @@ internal sealed partial class SettingsWindow : Window
                 Content = recording ? T("录屏文件", "Recording files") : T("截图标注", "Annotations"),
                 Margin = new Thickness(0, 0, 6, 0)
             };
-            if (recording == showRecordingSettings) { tab.Background = Brush("#4C5872"); tab.Foreground = Brushes.White; }
+            if (recording == showRecordingSettings)
+            {
+                tab.Background = Brush(dark ? "#414758" : "#E1E5EE");
+                tab.BorderBrush = Brush(dark ? "#A6B1CA" : "#9DAAC5");
+            }
             tab.Click += (_, _) => { showRecordingSettings = recording; Render(); };
             choices.Children.Add(tab);
         }
@@ -1209,7 +1213,7 @@ internal sealed partial class SettingsWindow : Window
             {
                 Child = group, Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(8),
                 Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#262832" : ThemeManager.IceWhite),
-                BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1)
+                BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(0, 1, 0, 0)
             });
         }
 
@@ -1367,7 +1371,7 @@ internal sealed partial class SettingsWindow : Window
         display.Children.Add(new TextBlock { Text = T("界面外观", "Appearance"), FontSize = 16, FontWeight = FontWeights.SemiBold });
         if (audioState is not null)
         {
-            panel.Children.Add(BuildAudioMasterSwitch(audioState.Snapshot, dark));
+            panel.Children.Add(BuildAudioMasterSwitch(audioState.Snapshot, dark, embedded: true));
         }
         var launch = Toggle(T("登录时启动辅助工具", "Launch at sign-in"), ConfigurationStore.Shared.Configuration.LaunchAtLogin);
         launch.Click += (_, _) =>
@@ -1383,10 +1387,14 @@ internal sealed partial class SettingsWindow : Window
 
         var appearance = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 18, 0, 0) };
         appearance.Children.Add(new TextBlock { Text = T("主题", "Theme"), Width = 120, VerticalAlignment = VerticalAlignment.Center, Foreground = Foreground });
-        var theme = new ComboBox { Width = 170, ItemsSource = new[] { "Light", "Dark" }, SelectedItem = audioState?.Snapshot.Theme };
+        var theme = new ComboBox
+        {
+            Width = 150, ItemsSource = new[] { T("浅色", "Light"), T("深色", "Dark") },
+            SelectedIndex = dark ? 1 : 0
+        };
         theme.SelectionChanged += (_, _) =>
         {
-            if (theme.SelectedItem is string value) { audioState?.SetTheme(value); Render(); }
+            if (theme.SelectedIndex >= 0) audioState?.SetTheme(theme.SelectedIndex == 1 ? "Dark" : "Light");
         };
         appearance.Children.Add(theme);
         display.Children.Add(appearance);
@@ -1410,7 +1418,7 @@ internal sealed partial class SettingsWindow : Window
         return layout;
     }
 
-    private UIElement BuildAudioMasterSwitch(AppStateSnapshot snapshot, bool dark)
+    private UIElement BuildAudioMasterSwitch(AppStateSnapshot snapshot, bool dark, bool embedded = false)
     {
         var panel = new DockPanel();
         var toggle = Toggle(T("启用音频功能", "Enable audio features"), snapshot.AudioEnabled);
@@ -1433,7 +1441,7 @@ internal sealed partial class SettingsWindow : Window
             TextWrapping = TextWrapping.Wrap
         });
         panel.Children.Add(labels);
-        return WaccCard(panel, dark);
+        return embedded ? panel : WaccCard(panel, dark);
     }
 
     private UIElement BuildProfileRecoverySwitch(AppStateSnapshot snapshot, bool dark)
@@ -1702,12 +1710,12 @@ internal sealed partial class SettingsWindow : Window
         };
     }
 
-    private Border WaccCard(UIElement child, bool dark) => new()
+    private Border WaccCard(UIElement child, bool dark, bool outlined = false) => new()
     {
         Child = child,
         Padding = new Thickness(16),
-        CornerRadius = new CornerRadius(8),
-        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(outlined ? 8 : 0),
+        BorderThickness = outlined ? new Thickness(1) : new Thickness(0, 1, 0, 0),
         BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
         Background = Brush(dark ? "#262832" : ThemeManager.IceWhite)
     };

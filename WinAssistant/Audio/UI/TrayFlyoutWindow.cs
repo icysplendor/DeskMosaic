@@ -206,7 +206,7 @@ internal sealed class TrayFlyoutWindow : Window
         {
             Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
             BorderBrush = active ? Brush("#4C5872") : LineBrush(dark),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(0, 0, 0, 1),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Margin = new Thickness(2, 2, 2, 4),
             Padding = new Thickness(10, 8, 10, 8),

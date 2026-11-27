@@ -387,9 +387,10 @@ private struct TranslationWindowView: View {
                         .disabled(controller.fileCompleted)
                         .padding(.leading, 4)
                     if !controller.running && !controller.fileCompleted {
-                        sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
+                        Button(t("互译", "Two-way")) {
                             controller.toggle(twoWay: true)
                         }
+                        .buttonStyle(.bordered)
                         .disabled(!canStartTwoWay)
                         .help(twoWayHelp)
                     }
@@ -444,7 +445,8 @@ private struct TranslationWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(dark ? Color(red: 0.08, green: 0.125, blue: 0.2) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line).allowsHitTesting(false))
+            .overlay(alignment: .top) { Rectangle().fill(line).frame(height: 1) }
+            .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
             .overlay(alignment: controller.captions.isEmpty ? .center : .topLeading) {
                 if controller.captions.isEmpty || controller.failed {
                     Text(controller.speechReady ? t("等待语音…", "Waiting for speech…")
@@ -1121,7 +1123,7 @@ struct TranslationSettingsView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(settings.theme == "Dark" ? Color.primary.opacity(0.035) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
+        .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 1) }
     }
 
     private func file(_ label: String, path: Binding<String>, url: URL, type: UTType? = nil,

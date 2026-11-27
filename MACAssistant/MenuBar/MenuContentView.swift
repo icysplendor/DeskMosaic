@@ -162,7 +162,7 @@ struct MenuContentView: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 54)
             .background(active ? accent.opacity(dark ? 0.32 : 0.12) : panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(active ? accent : line))
+            .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
         }
         .buttonStyle(DeskPlainButtonStyle())
         .disabled(outputName == nil || inputName == nil)
