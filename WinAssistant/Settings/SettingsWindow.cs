@@ -167,9 +167,9 @@ internal sealed partial class SettingsWindow : Window
                 Content = index == 0 ? T("音频", "Audio") : PageName(index),
                 MinWidth = 72,
                 Margin = new Thickness(0, 0, 8, 0),
-                Background = selected ? Brush("#333846") : Brushes.Transparent,
-                BorderBrush = selected ? Brush("#333846") : Brushes.Transparent,
-                Foreground = selected ? Brushes.White : Foreground
+                Background = selected ? Brush(dark ? "#333846" : ThemeManager.GrayBlue) : Brushes.Transparent,
+                BorderBrush = selected ? Brush(dark ? "#333846" : ThemeManager.GrayBlue) : Brushes.Transparent,
+                Foreground = selected && dark ? Brushes.White : Foreground
             };
             tab.Click += (_, _) => { selectedTabIndex = target; Render(); };
             tabs.Children.Add(tab);
@@ -404,9 +404,9 @@ internal sealed partial class SettingsWindow : Window
         var add = new Button
         {
             Content = T("＋ 新建组合", "+ New profile"),
-            Background = Brush("#4C5872"),
-            BorderBrush = Brush("#4C5872"),
-            Foreground = Brushes.White,
+            Background = Brush(dark ? "#4C5872" : ThemeManager.GrayBlue),
+            BorderBrush = Brush(dark ? "#4C5872" : ThemeManager.GrayBlue),
+            Foreground = dark ? Brushes.White : Foreground,
             IsEnabled = snapshot.CurrentOutput is not null && snapshot.CurrentInput is not null
         };
         add.Click += (_, _) => audioState?.AddCurrentProfile();
@@ -535,8 +535,8 @@ internal sealed partial class SettingsWindow : Window
         {
             Content = active ? T("使用中", "Active") : T("应用", "Apply"),
             IsEnabled = !active && outputOnline && inputOnline,
-            Background = active ? Brush("#4C5872") : Background,
-            Foreground = active ? Brushes.White : Foreground,
+            Background = active ? Brush(dark ? "#4C5872" : ThemeManager.GrayBlue) : Background,
+            Foreground = active && dark ? Brushes.White : Foreground,
             Width = 64,
             Height = 42,
             Padding = new Thickness(0),

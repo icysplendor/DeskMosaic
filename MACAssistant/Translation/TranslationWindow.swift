@@ -331,6 +331,7 @@ private struct TranslationWindowView: View {
     @EnvironmentObject private var settings: SettingsManager
     @State private var scrollPosition = CaptionScrollPosition()
     @State private var confirmingClear = false
+    @State private var showingOptions = false
 
     private enum AudioSource: Hashable {
         case none, system, microphone, both, file
@@ -374,44 +375,44 @@ private struct TranslationWindowView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
-                        (.system, t("电脑声音", "System audio")),
-                        (.microphone, t("麦克风", "Microphone")),
-                        (.both, t("电脑声＋麦克风", "System + mic")),
-                        (.file, t("导入音频", "Import audio"))
-                    ], placeholder: t("请选择", "Select"))
-                    .disabled(controller.running)
-                    sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
-                        .disabled(controller.fileCompleted)
-                        .padding(.leading, 4)
-                    if !controller.running && !controller.fileCompleted {
-                        Button(t("互译", "Two-way")) {
-                            controller.toggle(twoWay: true)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!canStartTwoWay)
-                        .help(twoWayHelp)
-                    }
-                    Spacer()
-                    exportMenu
-                    Button { controller.openSettings() } label: { Label(t("设置", "Settings"), systemImage: "gearshape") }
-                }
-                sessionOptionsRow
-            }
-            .padding(10)
-            .background(dark ? Color(nsColor: .windowBackgroundColor) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
-            if let file = controller.audioFile {
-                Button { controller.chooseAudioFile() } label: {
-                    Label(t("已选择 · ", "Selected · ") + file.lastPathComponent, systemImage: "waveform")
-                        .lineLimit(1)
-                }
-                .help(file.path + "\n" + t("点击更换音频文件", "Click to choose another audio file"))
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
+                    (.system, t("电脑声音", "System audio")),
+                    (.microphone, t("麦克风", "Microphone")),
+                    (.both, t("电脑声＋麦克风", "System + mic")),
+                    (.file, t("导入音频", "Import audio"))
+                ], placeholder: t("请选择", "Select"))
                 .disabled(controller.running)
+                languageControls
+                sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
+                    .disabled(controller.fileCompleted)
+                    .padding(.leading, 4)
+                if !controller.running && !controller.fileCompleted {
+                    Button(t("互译", "Two-way")) {
+                        controller.toggle(twoWay: true)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canStartTwoWay)
+                    .help(twoWayHelp)
+                }
+                Spacer()
+                Button { showingOptions.toggle() } label: { Image(systemName: "ellipsis.circle") }
+                    .help(t("会话选项", "Session options"))
+                    .accessibilityLabel(t("会话选项", "Session options"))
+                    .popover(isPresented: $showingOptions) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            sessionOptions
+                            fileControl
+                            exportMenu
+                            Button { showingOptions = false; controller.openSettings() } label: {
+                                Label(t("设置", "Settings"), systemImage: "gearshape")
+                            }
+                        }.padding(12)
+                    }
             }
-
+            .controlSize(.small)
+            .frame(height: 30)
             ScrollViewReader { reader in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -470,6 +471,7 @@ private struct TranslationWindowView: View {
                 Toggle(t("显示原文", "Show source"), isOn: settings.translationBinding(\.showSource))
                     .help(t("译文定稿后继续显示原文", "Keep the source visible after the translation is final"))
                 Spacer(minLength: 0)
+                sessionStatus
                 Button {
                     confirmingClear = true
                 } label: {
@@ -477,10 +479,11 @@ private struct TranslationWindowView: View {
                 }
                 .help(t("清空当前字幕", "Clear current captions"))
                 .disabled(controller.captions.isEmpty)
-            }
+            }.controlSize(.small).frame(height: 30)
 
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
         .frame(minWidth: 670, minHeight: 270)
         .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
             guard !controller.running, providers.count == 1, let provider = providers.first else { return false }
@@ -505,51 +508,65 @@ private struct TranslationWindowView: View {
         }
     }
 
-    private var sessionOptionsRow: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
-                                 available: controller.sessionOptions.sessionSourceLanguages)
-                    .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
-                Button { controller.swapLanguages() } label: {
-                    Image(systemName: "arrow.left.arrow.right")
-                }
-                .accessibilityLabel(t("交换语言", "Swap languages"))
-                .help(t("交换语言", "Swap languages"))
-                .disabled(!controller.canSwapLanguages)
-                languageDropdown(t("目标语言", "Target language"), selection: $controller.targetLanguage,
-                                 available: controller.sessionOptions.targetLanguages(for: controller.sourceLanguage))
-                    .disabled(controller.transcribeOnly || controller.sessionOptions.availableTargetLanguages.isEmpty)
+    private var languageControls: some View {
+        HStack(spacing: 6) {
+            languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
+                             available: controller.sessionOptions.sessionSourceLanguages)
+                .disabled(controller.sessionOptions.sessionSourceLanguages.isEmpty)
+            Button { controller.swapLanguages() } label: {
+                Image(systemName: "arrow.left.arrow.right")
             }
-            .disabled(controller.running)
-            Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
-                .help(t("仅记录原文字幕", "Record source captions only"))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .disabled(controller.running)
-            Toggle(t("录音", "Record"), isOn: controller.audioFile == nil ? settings.translationBinding(\.recordAudio) : .constant(false))
-                .help(controller.audioFile == nil
-                      ? t("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads")
-                      : t("导入音频时无法录音", "Recording is unavailable for imported audio"))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .fixedSize()
-                .disabled(controller.running || controller.audioFile != nil)
-            advancedReviewButton
-            Spacer(minLength: 8)
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(controller.failed || (controller.listening && controller.recording) ? Color.red
-                          : controller.listening ? Color.green : Color.secondary)
-                    .frame(width: 8, height: 8)
-                Text(controller.status.isEmpty ? t("就绪", "Ready") : controller.status)
-                    .foregroundStyle(.secondary)
+            .accessibilityLabel(t("交换语言", "Swap languages"))
+            .help(t("交换语言", "Swap languages"))
+            .disabled(!controller.canSwapLanguages)
+            languageDropdown(t("目标语言", "Target language"), selection: $controller.targetLanguage,
+                             available: controller.sessionOptions.targetLanguages(for: controller.sourceLanguage))
+                .disabled(controller.transcribeOnly || controller.sessionOptions.availableTargetLanguages.isEmpty)
+        }
+        .disabled(controller.running)
+    }
+
+    @ViewBuilder private var fileControl: some View {
+        if let file = controller.audioFile {
+            Button { controller.chooseAudioFile() } label: {
+                Label(t("已选择 · ", "Selected · ") + file.lastPathComponent, systemImage: "waveform")
                     .lineLimit(1)
             }
-            .help(controller.savedRecording?.path ?? controller.status)
-            .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
+            .help(file.path + "\n" + t("点击更换音频文件", "Click to choose another audio file"))
+            .disabled(controller.running)
         }
+    }
+
+    @ViewBuilder private var sessionOptions: some View {
+        Toggle(t("仅记录", "Transcribe only"), isOn: $controller.transcribeOnly)
+            .help(t("仅记录原文字幕", "Record source captions only"))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(controller.running)
+        Toggle(t("录音", "Record"), isOn: controller.audioFile == nil ? settings.translationBinding(\.recordAudio) : .constant(false))
+            .help(controller.audioFile == nil
+                  ? t("开始时录音，结束后保存 WAV 到下载文件夹", "Record on start and save a WAV to Downloads")
+                  : t("导入音频时无法录音", "Recording is unavailable for imported audio"))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(controller.running || controller.audioFile != nil)
+        advancedReviewButton
+    }
+
+    private var sessionStatus: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(controller.failed || (controller.listening && controller.recording) ? Color.red
+                      : controller.listening ? Color.green : Color.secondary)
+                .frame(width: 8, height: 8)
+            Text(controller.status.isEmpty ? t("就绪", "Ready") : controller.status)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .help(controller.savedRecording?.path ?? controller.status)
+        .accessibilityLabel(controller.savedRecording?.path ?? controller.status)
     }
 
     private var advancedReviewButton: some View {
@@ -595,8 +612,11 @@ private struct TranslationWindowView: View {
                 .frame(minWidth: 54)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(controller.running || dark ? tint : DeskPalette.grayBlue, in: RoundedRectangle(cornerRadius: 5))
+        .foregroundStyle(controller.running || dark ? Color.white : DeskPalette.buttonInk)
+        .buttonStyle(DeskPlainButtonStyle())
     }
 
     private var twoWayHelp: String {

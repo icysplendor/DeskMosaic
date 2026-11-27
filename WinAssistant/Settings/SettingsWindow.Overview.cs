@@ -159,7 +159,12 @@ internal sealed partial class SettingsWindow
             Margin = new Thickness(0, 5, 0, 0)
         };
         System.Windows.Automation.AutomationProperties.SetName(button, title);
-        if (primary) { button.Background = Brush("#333846"); button.Foreground = Brushes.White; }
+        if (primary)
+        {
+            bool dark = audioState?.Snapshot.Theme == "Dark";
+            button.Background = Brush(dark ? "#333846" : ThemeManager.GrayBlue);
+            button.Foreground = dark ? Brushes.White : Brush(ThemeManager.ButtonInk);
+        }
         button.Click += (_, _) => action();
         return button;
     }

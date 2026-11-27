@@ -188,9 +188,11 @@ internal sealed class TrayFlyoutWindow : Window
         }
         else
         {
+            panel.Children.Add(new Border { Height = 1, Background = LineBrush(dark) });
             foreach (var profile in snapshot.Profiles)
             {
                 panel.Children.Add(CreateProfileRow(profile, snapshot, dark));
+                panel.Children.Add(new Border { Height = 1, Background = LineBrush(dark) });
             }
         }
         return new ScrollViewer { Content = panel, MaxHeight = 278, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -204,11 +206,11 @@ internal sealed class TrayFlyoutWindow : Window
             && AudioDeviceInfo.IdEquals(snapshot.CurrentInput?.Id, profile.InputDeviceId);
         var button = new Button
         {
-            Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
+            Background = active ? Brush(dark ? "#414758" : ThemeManager.GrayBlue) : SurfaceBrush(dark),
             BorderBrush = active ? Brush("#4C5872") : LineBrush(dark),
-            BorderThickness = new Thickness(0, 0, 0, 1),
+            BorderThickness = new Thickness(0),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(2, 2, 2, 4),
+            Margin = new Thickness(2, 3, 2, 3),
             Padding = new Thickness(10, 8, 10, 8),
             MinHeight = 54,
             Cursor = Cursors.Hand,
@@ -254,7 +256,7 @@ internal sealed class TrayFlyoutWindow : Window
     {
         var border = new Border
         {
-            Background = current ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
+            Background = current ? Brush(dark ? "#414758" : ThemeManager.GrayBlue) : SurfaceBrush(dark),
             BorderBrush = current ? Brush("#4C5872") : LineBrush(dark),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),

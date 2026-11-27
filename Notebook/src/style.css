@@ -8,6 +8,9 @@
   --text: #20212a;
   --muted: #636674;
   --accent: #4c5872;
+  --button-fill: #dae3fa;
+  --button-hover: #cbd7f3;
+  --button-text: #262b3b;
   --selected: #e1e5ee;
   --code: var(--ice-white);
   --title: var(--ice-white);
@@ -20,6 +23,9 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --button-fill: #4c5872;
+  --button-hover: #384258;
+  --button-text: white;
   --bg: #191a21;
   --surface: #20222c;
   --panel: #262832;
@@ -76,11 +82,11 @@ button:disabled {
   cursor: default;
 }
 .primary {
-  background: var(--accent);
-  color: white;
+  background: var(--button-fill);
+  color: var(--button-text);
 }
 .primary:hover {
-  background: #384258;
+  background: var(--button-hover);
 }
 .danger {
   color: #dc4455;

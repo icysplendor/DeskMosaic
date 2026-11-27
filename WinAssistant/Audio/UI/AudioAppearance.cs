@@ -6,6 +6,8 @@ namespace WinAssistant.Audio.UI;
 
 public static class ThemeManager
 {
+    internal const string GrayBlue = "#DAE3FA";
+    internal const string ButtonInk = "#262B3B";
     internal const string IceWhite = "#FFFFFF";
     public const string Light = "Light";
     public const string Dark = "Dark";

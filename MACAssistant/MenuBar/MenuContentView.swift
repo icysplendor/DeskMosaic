@@ -123,14 +123,18 @@ struct MenuContentView: View {
                 profileRows
             } else {
                 ScrollView(.vertical) { profileRows.padding(.trailing, 12) }
-                    .frame(height: 4 * 54 + 3 * 6)
+                    .frame(height: 4 * (54 + 6 + 1) + 1)
             }
         }
     }
 
     private var profileRows: some View {
-        VStack(spacing: 6) {
-            ForEach(audio.profiles) { profile in profileRow(profile) }
+        VStack(spacing: 0) {
+            Rectangle().fill(line).frame(height: 1)
+            ForEach(audio.profiles) { profile in
+                profileRow(profile).padding(.vertical, 3)
+                Rectangle().fill(line).frame(height: 1)
+            }
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
@@ -161,8 +165,8 @@ struct MenuContentView: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, minHeight: 54)
-            .background(active ? accent.opacity(dark ? 0.32 : 0.12) : panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
+            .background(active ? (dark ? accent.opacity(0.32) : DeskPalette.grayBlue) : panel, in: RoundedRectangle(cornerRadius: 8))
+
         }
         .buttonStyle(DeskPlainButtonStyle())
         .disabled(outputName == nil || inputName == nil)

@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 enum DeskPalette {
+    static let grayBlue = Color(red: 218/255, green: 227/255, blue: 250/255)
+    static let buttonInk = Color(red: 0.15, green: 0.17, blue: 0.23)
     static let iceWhiteNS = NSColor.white
     static let iceWhite = Color(nsColor: iceWhiteNS)
 }
@@ -405,9 +407,9 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity)
             Button(active ? t("使用中", "Active") : t("应用", "Apply")) { audio.activateProfile(id: profile.id) }
                 .fontWeight(.semibold)
-                .foregroundStyle(active ? Color.white : Color.primary)
+                .foregroundStyle(active && dark ? Color.white : Color.primary)
                 .frame(width: 68, height: 34)
-                .background(active ? accent : surface, in: RoundedRectangle(cornerRadius: 8))
+                .background(active ? (dark ? accent : DeskPalette.grayBlue) : surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(alignment: .bottom) { Rectangle().fill(line).frame(height: 1) }
                 .buttonStyle(DeskPlainButtonStyle())
                 .disabled(active || !outputOnline || !inputOnline)
@@ -866,21 +868,23 @@ private struct WaccButtonStyle: ButtonStyle {
 }
 
 private struct WaccPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var scheme
     let accent: Color
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .fontWeight(.semibold)
-            .foregroundStyle(.white)
+            .foregroundStyle(scheme == .dark ? Color.white : DeskPalette.buttonInk)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(accent.opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .background((scheme == .dark ? accent : DeskPalette.grayBlue).opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 8))
             .modifier(DeskPressFeedback(pressed: configuration.isPressed))
     }
 }
 
 private struct WaccTabButtonStyle: ButtonStyle {
     let selected: Bool
+    @Environment(\.colorScheme) private var scheme
     let accent: Color
     let panel: Color
     let line: Color
@@ -888,11 +892,11 @@ private struct WaccTabButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .fontWeight(.semibold)
-            .foregroundStyle(selected ? Color.white : Color.primary)
+            .foregroundStyle(selected && scheme == .light ? DeskPalette.buttonInk : selected ? Color.white : Color.primary)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(selected ? accent : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? accent : Color.clear))
+            .background(selected ? (scheme == .dark ? accent : DeskPalette.grayBlue) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? (scheme == .dark ? accent : DeskPalette.grayBlue) : Color.clear))
             .modifier(DeskPressFeedback(pressed: configuration.isPressed))
     }
 }
@@ -977,11 +981,15 @@ enum DeskWindowChrome {
         let header = NotebookTitlebar(frame: NSRect(x: 0, y: bounds.height - 38, width: bounds.width, height: 38))
         header.autoresizingMask = [.width, .minYMargin]
         let label = NSTextField(labelWithString: title)
-        label.frame = NSRect(x: 14, y: 9, width: bounds.width - 165, height: 20)
-        label.autoresizingMask = [.width]
+        label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.bind(.value, to: window, withKeyPath: "title", options: nil)
         header.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -130)
+        ])
         addControls(to: header)
         content.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - 38)
         content.autoresizingMask = [.width, .height]
@@ -991,79 +999,118 @@ enum DeskWindowChrome {
     }
 
     static func addControls(to header: NSView) {
-        let controls = NSHostingView(rootView: DeskCaptionControls())
-        controls.frame = NSRect(x: header.bounds.width - 120, y: (header.bounds.height - 32) / 2, width: 114, height: 32)
-        controls.autoresizingMask = [.minXMargin]
+        let controls = DeskCaptionStrip(frame: .zero)
         header.addSubview(controls)
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            controls.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            controls.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
+            controls.heightAnchor.constraint(equalToConstant: 30),
+            controls.widthAnchor.constraint(equalToConstant: 112)
+        ])
     }
 }
 
-private final class CaptionAnchor: NSView {}
-
-private struct CaptionWindowAnchor: NSViewRepresentable {
-    let anchor: CaptionAnchor
-    func makeNSView(context: Context) -> CaptionAnchor { anchor }
-    func updateNSView(_ view: CaptionAnchor, context: Context) {}
+private struct DeskCaptionControls: NSViewRepresentable {
+    func makeNSView(context: Context) -> DeskCaptionStrip { DeskCaptionStrip(frame: .zero) }
+    func updateNSView(_ view: DeskCaptionStrip, context: Context) { view.refreshLabels() }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: DeskCaptionStrip, context: Context) -> CGSize? {
+        CGSize(width: 112, height: 30)
+    }
 }
 
-struct DeskCaptionControls: View {
-    @State private var anchor = CaptionAnchor()
-    @State private var maximized = false
-    @State private var hover: Int?
-    @ObservedObject private var settings = SettingsManager.shared
+private final class DeskCaptionStrip: NSView {
+    private let buttons = (0..<3).map { DeskCaptionButton(index: $0) }
 
-    var body: some View {
-        HStack(spacing: 2) {
-            control(0, "最小化", "Minimize")
-            control(1, maximized ? "还原" : "最大化", maximized ? "Restore" : "Maximize")
-            control(2, "关闭", "Close")
-        }
-        .background(CaptionWindowAnchor(anchor: anchor))
-        .onAppear { maximized = anchor.window?.isZoomed == true }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
-            if let window = note.object as? NSWindow, window === anchor.window { maximized = window.isZoomed }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        for button in buttons {
+            addSubview(button)
+            button.target = self
+            button.action = #selector(activate(_:))
         }
     }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private func control(_ index: Int, _ chinese: String, _ english: String) -> some View {
-        let label = settings.language == "en-US" ? english : chinese
-        return Button {
-            guard let window = anchor.window else { return }
-            switch index {
-            case 0: window.miniaturize(nil)
-            case 1: window.zoom(nil)
-            default: window.performClose(nil)
-            }
-        } label: {
-            Path { path in
-                switch index {
-                case 0:
-                    path.move(to: CGPoint(x: 2, y: 7)); path.addLine(to: CGPoint(x: 12, y: 7))
-                case 1 where maximized:
-                    path.addRect(CGRect(x: 2, y: 5, width: 7, height: 7))
-                    path.addLines([CGPoint(x: 5, y: 3), CGPoint(x: 5, y: 2), CGPoint(x: 12, y: 2),
-                                   CGPoint(x: 12, y: 9), CGPoint(x: 11, y: 9)])
-                case 1:
-                    path.addRect(CGRect(x: 2, y: 2, width: 10, height: 10))
-                default:
-                    path.move(to: CGPoint(x: 2, y: 2)); path.addLine(to: CGPoint(x: 12, y: 12))
-                    path.move(to: CGPoint(x: 12, y: 2)); path.addLine(to: CGPoint(x: 2, y: 12))
-                }
-            }
-                .stroke(lineWidth: 1.4)
-                .frame(width: 14, height: 14)
-                .foregroundStyle(hover == 2 && index == 2 ? Color.white : Color.primary)
-                .frame(width: 36, height: 30)
-                .background(hover == index ? (index == 2 ? Color(red: 0.71, green: 0.23, blue: 0.29) : Color.primary.opacity(0.09)) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
+    override func layout() {
+        super.layout()
+        for button in buttons {
+            button.frame = NSRect(x: CGFloat(button.tag * 38), y: (bounds.height - 30) / 2, width: 36, height: 30)
         }
-        .buttonStyle(DeskPlainButtonStyle())
-        .onHover { inside in
-            if inside { hover = index } else if hover == index { hover = nil }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(self)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(refreshLabels), name: NSWindow.didResizeNotification, object: window)
         }
-        .accessibilityLabel(label)
-        .help(label)
+        refreshLabels()
+    }
+    @objc func refreshLabels() {
+        let zoomed = window?.isZoomed == true
+        let english = SettingsManager.shared.language == "en-US"
+        let labels = english ? ["Minimize", zoomed ? "Restore" : "Maximize", "Close"] : ["最小化", zoomed ? "还原" : "最大化", "关闭"]
+        for button in buttons {
+            button.toolTip = labels[button.tag]
+            button.setAccessibilityLabel(labels[button.tag])
+            button.needsDisplay = true
+        }
+    }
+    @objc private func activate(_ sender: NSButton) {
+        switch sender.tag {
+        case 0: window?.miniaturize(nil)
+        case 1: window?.zoom(nil)
+        default: window?.performClose(nil)
+        }
+    }
+}
+
+private final class DeskCaptionButton: NSButton {
+    private var hovered = false
+    private var tracking: NSTrackingArea?
+    init(index: Int) {
+        super.init(frame: .zero)
+        tag = index
+        title = ""
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        let pressed = cell?.isHighlighted == true
+        if hovered || pressed {
+            (tag == 2 ? NSColor.systemRed : NSColor.labelColor.withAlphaComponent(pressed ? 0.18 : 0.09)).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
+        }
+        ((hovered || pressed) && tag == 2 ? NSColor.white : NSColor.labelColor).setStroke()
+        let rect = NSRect(x: bounds.midX - 5, y: bounds.midY - 5, width: 10, height: 10)
+        let path = NSBezierPath()
+        switch tag {
+        case 0:
+            path.move(to: NSPoint(x: rect.minX, y: bounds.midY))
+            path.line(to: NSPoint(x: rect.maxX, y: bounds.midY))
+        case 1 where window?.isZoomed == true:
+            path.append(NSBezierPath(rect: NSRect(x: rect.minX, y: rect.midY - 2, width: 7, height: 7)))
+            path.move(to: NSPoint(x: rect.midX - 2, y: rect.midY - 3))
+            path.line(to: NSPoint(x: rect.midX - 2, y: rect.minY))
+            path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+            path.line(to: NSPoint(x: rect.maxX, y: rect.midY + 2))
+        case 1: path.append(NSBezierPath(rect: rect))
+        default:
+            path.move(to: rect.origin); path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+            path.move(to: NSPoint(x: rect.minX, y: rect.maxY)); path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        }
+        path.lineWidth = 1.4
+        path.stroke()
     }
 }
 

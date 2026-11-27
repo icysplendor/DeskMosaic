@@ -33,8 +33,8 @@ internal sealed class TranslationWindow : Window
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
     private Brush Danger => (Brush)Resources["CaptionDanger"];
-    private readonly Button start = new() { MinWidth = 80 };
-    private readonly Button twoWay = new() { Width = 80 };
+    private readonly Button start = new() { MinWidth = 56 };
+    private readonly Button twoWay = new() { Width = 64 };
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -42,9 +42,9 @@ internal sealed class TranslationWindow : Window
     private readonly System.Windows.Shapes.Path reviewGlyph = new() { Width = 15, Height = 15, Stretch = Stretch.Uniform,
         StrokeThickness = 1.35, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
     private readonly CheckBox showSource = new() { VerticalAlignment = VerticalAlignment.Center };
-    private readonly ComboBox audioSource = new() { MinWidth = 132, VerticalAlignment = VerticalAlignment.Center };
-    private readonly ComboBox sourceLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
-    private readonly ComboBox targetLanguage = new() { MinWidth = 105, SelectedValuePath = "Tag" };
+    private readonly ComboBox audioSource = new() { Width = 112, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox sourceLanguage = new() { Width = 96, SelectedValuePath = "Tag" };
+    private readonly ComboBox targetLanguage = new() { Width = 96, SelectedValuePath = "Tag" };
     private readonly Button swapLanguages = new() { Padding = new Thickness(8, 3, 8, 3), VerticalAlignment = VerticalAlignment.Bottom };
     private readonly ComboBox compute = new() { MinWidth = 85, SelectedValuePath = "Tag" };
     private readonly ComboBox originalSize = new() { Width = 53 };
@@ -116,12 +116,12 @@ internal sealed class TranslationWindow : Window
         {
             Source = new Uri("pack://application:,,,/Translation/TranslationWindowStyles.xaml", UriKind.Absolute)
         });
-        var root = new DockPanel { Margin = new Thickness(12) };
-        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var toolbar = new WrapPanel();
+        var root = new DockPanel { Margin = new Thickness(8, 2, 8, 2) };
+        var header = new DockPanel { Height = 36 };
+        var toolbar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         DockPanel.SetDock(clear, Dock.Right);
         header.Children.Add(clear);
-        header.Children.Add(toolbar);
+
         DockPanel.SetDock(header, Dock.Bottom);
         root.Children.Add(header);
 
@@ -130,8 +130,10 @@ internal sealed class TranslationWindow : Window
         foreach (var button in new[] { start, twoWay, clear, swapLanguages })
             button.Style = (Style)Resources["CaptionButton"];
         swapLanguages.VerticalAlignment = VerticalAlignment.Center;
-        start.Background = start.BorderBrush = Accent;
-        start.Foreground = Brushes.White;
+        Resources["StartFill"] = dark ? Accent : ColorBrush(ThemeManager.GrayBlue);
+        Resources["StartInk"] = dark ? Brushes.White : ColorBrush(ThemeManager.ButtonInk);
+        start.Background = start.BorderBrush = (Brush)Resources["StartFill"];
+        start.Foreground = (Brush)Resources["StartInk"];
         twoWay.Background = (Brush)Resources["CaptionSurface"];
         twoWay.BorderBrush = Line;
         twoWay.Foreground = Foreground;
@@ -153,15 +155,14 @@ internal sealed class TranslationWindow : Window
         audioSource.ToolTip = T("音源", "Audio source");
         AutomationProperties.SetName(audioSource, T("音源", "Audio source"));
 
-        var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
-        DockPanel.SetDock(footer, Dock.Bottom);
         var state = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
         status.Foreground = Muted;
         state.Children.Add(statusIndicator);
         state.Children.Add(status);
         DockPanel.SetDock(state, Dock.Right);
-        footer.Children.Add(state);
-        root.Children.Add(footer);
+        status.MaxWidth = 140;
+        header.Children.Add(state);
+        header.Children.Add(toolbar);
         audioSource.Items.Add(T("电脑声音", "System audio"));
         audioSource.Items.Add(T("麦克风", "Microphone"));
         audioSource.Items.Add(T("电脑声＋麦克风", "System + mic"));
@@ -212,22 +213,23 @@ internal sealed class TranslationWindow : Window
         AutomationProperties.SetName(targetLanguage, T("目标语言", "Target language"));
         sourceLanguage.ToolTip = T("源语言", "Source language");
         targetLanguage.ToolTip = T("目标语言", "Target language");
-        var languages = new WrapPanel();
-        languages.Children.Add(audioSource);
-        languages.Children.Add(sourceLanguage);
-        languages.Children.Add(swapLanguages);
-        languages.Children.Add(targetLanguage);
+        var languages = new ToolBar { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0), Height = 36 };
+        ToolBarTray.SetIsLocked(languages, true);
+        languages.Items.Add(audioSource);
+        languages.Items.Add(sourceLanguage);
+        languages.Items.Add(swapLanguages);
+        languages.Items.Add(targetLanguage);
         transcribeOnly.Foreground = Foreground;
         transcribeOnly.Content = T("仅记录", "Transcribe only");
         transcribeOnly.ToolTip = T("仅记录原文字幕", "Record source captions only");
         transcribeOnly.Click += (_, _) => UpdateLanguageControls();
-        languages.Children.Add(transcribeOnly);
+        languages.Items.Add(transcribeOnly);
         recordAudio.Foreground = Foreground;
         recordAudio.Content = T("录音", "Record");
         ToolTipService.SetShowOnDisabled(recordAudio, true);
         recordAudio.Click += (_, _) =>
             ConfigurationStore.Shared.Update(config => config.Translation.RecordAudio = recordAudio.IsChecked == true);
-        languages.Children.Add(recordAudio);
+        languages.Items.Add(recordAudio);
         StyleToolbarIcon(advancedReview, "\uE73E", T("高级复核", "Advanced review"));
         advancedReview.Width = 30;
         advancedReview.Content = reviewGlyph;
@@ -246,16 +248,15 @@ internal sealed class TranslationWindow : Window
             UpdateAdvancedReview(SessionOptions());
         };
         Activated += (_, _) => UpdateAdvancedReview(SessionOptions());
-        languages.Children.Add(advancedReview);
+        languages.Items.Add(advancedReview);
         start.Margin = new Thickness(10, 0, 0, 0);
         twoWay.Margin = new Thickness(8, 0, 0, 0);
-        languages.Children.Add(start);
-        languages.Children.Add(twoWay);
+        languages.Items.Add(start);
+        languages.Items.Add(twoWay);
         var setup = new Border
         {
-            Child = languages, Padding = new Thickness(8), Background = (Brush)Resources["CaptionSurface"],
-            BorderBrush = Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
-            Margin = new Thickness(0, 0, 0, 8)
+            Child = languages, Padding = new Thickness(0), Background = (Brush)Resources["CaptionSurface"],
+            BorderThickness = new Thickness(0)
         };
         DockPanel.SetDock(setup, Dock.Top);
         root.Children.Insert(0, setup);
@@ -281,8 +282,8 @@ internal sealed class TranslationWindow : Window
         AddPreference(T("原文", "Source"), T("原文字号", "Source size"), originalSize);
         AddPreference(T("译文", "Target"), T("译文字号", "Translation size"), translationSize);
         toolbar.Children.Add(showSource);
-        languages.Children.Add(export);
-        languages.Children.Add(settings);
+        languages.Items.Add(export);
+        languages.Items.Add(settings);
 
         var captionSurface = new Grid();
         captions.Margin = new Thickness(8);
@@ -323,8 +324,11 @@ internal sealed class TranslationWindow : Window
         fileNotice.MaxWidth = 640;
         fileNotice.Margin = new Thickness(0, 0, 0, 8);
         fileNotice.Click += (_, _) => ChooseAudioFile();
-        DockPanel.SetDock(fileNotice, Dock.Top);
-        root.Children.Insert(root.Children.Count - 1, fileNotice);
+        languages.Items.Add(fileNotice);
+        foreach (var option in new UIElement[] { transcribeOnly, recordAudio, advancedReview, fileNotice, export, settings })
+            ToolBar.SetOverflowMode(option, OverflowMode.Always);
+        foreach (var action in new UIElement[] { audioSource, sourceLanguage, targetLanguage, swapLanguages, start, twoWay })
+            ToolBar.SetOverflowMode(action, OverflowMode.Never);
         AllowDrop = true;
         PreviewDragOver += (_, args) =>
         {
@@ -380,7 +384,8 @@ internal sealed class TranslationWindow : Window
         start.Content = fileCompleted ? T("音频执行完毕", "Audio processing complete")
             : session is null ? T("开始", "Start")
             : twoWaySession ? T("互译结束", "End two-way translation") : T("翻译结束", "End translation");
-        start.Background = start.BorderBrush = session is null ? Accent : Danger;
+        start.Background = start.BorderBrush = session is null ? (Brush)Resources["StartFill"] : Danger;
+        start.Foreground = session is null ? (Brush)Resources["StartInk"] : Brushes.White;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&
             targetLanguage.SelectedValue is string target &&
             options.SessionSourceLanguages.Contains(target) && options.TargetLanguagesFor(target).Contains(source);

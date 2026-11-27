@@ -32,15 +32,25 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         web.frame = NSRect(x: 0, y: 0, width: 1280, height: 822)
         web.autoresizingMask = [.width, .height]
         content.addSubview(web); content.addSubview(header)
-        let icon = NSImageView(frame: NSRect(x: 14, y: 7, width: 24, height: 24))
+        let icon = NSImageView()
         icon.image = NSImage(named: "AppEmblem"); header.addSubview(icon)
         let title = NSTextField(labelWithString: "笔记本")
-        title.frame = NSRect(x: 47, y: 8, width: 200, height: 22)
         title.font = .systemFont(ofSize: 14, weight: .semibold); header.addSubview(title)
         let theme = NSButton(title: "◐", target: self, action: #selector(toggleTheme))
-        theme.frame = NSRect(x: 1114, y: 3, width: 36, height: 32)
-        theme.autoresizingMask = [.minXMargin]; theme.bezelStyle = .texturedRounded
+        theme.bezelStyle = .texturedRounded
         theme.toolTip = "切换浅色或深色"; header.addSubview(theme)
+        for view in [icon as NSView, title, theme] { view.translatesAutoresizingMaskIntoConstraints = false }
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            icon.widthAnchor.constraint(equalToConstant: 24),
+            icon.heightAnchor.constraint(equalToConstant: 24),
+            icon.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 9),
+            title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            theme.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -126),
+            theme.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            theme.widthAnchor.constraint(equalToConstant: 36)
+        ])
         DeskWindowChrome.addControls(to: header)
         window.contentView = content; window.delegate = self; window.center()
         window.isMovableByWindowBackground = false
