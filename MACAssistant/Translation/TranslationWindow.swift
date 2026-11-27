@@ -1109,11 +1109,12 @@ struct TranslationSettingsView: View {
     }
 
     private func section<Content: View>(_ index: Int, _ title: String, @ViewBuilder content: () -> Content) -> some View {
-        DisclosureGroup(isExpanded: Binding(
+        let sectionContent = VStack(alignment: .leading, spacing: 10, content: content)
+        return DisclosureGroup(isExpanded: Binding(
             get: { openSections.contains(index) },
             set: { if $0 { openSections.insert(index) } else { openSections.remove(index) } }
         )) {
-            VStack(alignment: .leading, spacing: 10, content: content).padding(.top, 8)
+            sectionContent.padding(.top, 8)
         } label: {
             Text(title).font(.system(size: 15, weight: .semibold))
         }
