@@ -6,7 +6,7 @@ namespace WinAssistant.Audio.UI;
 
 public static class ThemeManager
 {
-    internal const string IceWhite = "#F0F1F6";
+    internal const string IceWhite = "#FFFFFF";
     public const string Light = "Light";
     public const string Dark = "Dark";
 

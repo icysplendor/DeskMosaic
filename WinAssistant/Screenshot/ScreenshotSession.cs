@@ -889,7 +889,7 @@ internal sealed class ScreenshotSession : IDisposable
 
         var toolbar = surface.GlobalToLocal(ToolbarRect());
         drawingContext.DrawRoundedRectangle(
-            new SolidColorBrush(Color.FromRgb(240, 241, 246)),
+            Brushes.White,
             new Pen(Brushes.Gray, 0.7),
             toolbar,
             8,

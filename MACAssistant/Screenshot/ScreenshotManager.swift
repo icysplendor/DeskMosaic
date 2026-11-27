@@ -1724,11 +1724,19 @@ private final class ScreenshotSession {
         )
     }
 
+    private func overlayPanelColor(darkOpacity: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor.windowBackgroundColor.withAlphaComponent(darkOpacity)
+                : DeskPalette.iceWhiteNS
+        }
+    }
+
     private func drawToolbar(on display: CapturedDisplay) {
         let globalToolbar = toolbarRect()
         guard display.frame.contains(NSPoint(x: globalToolbar.midX, y: globalToolbar.midY)) else { return }
         let toolbar = local(globalToolbar, on: display)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.97).setFill()
+        overlayPanelColor(darkOpacity: 0.97).setFill()
         NSBezierPath(roundedRect: toolbar, xRadius: 8, yRadius: 8).fill()
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: toolbar, xRadius: 8, yRadius: 8).stroke()
@@ -2029,7 +2037,7 @@ private final class ScreenshotSession {
         ) else { return }
         let rail = rects.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -4, dy: -4)
         let localRail = local(rail, on: display)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.98).setFill()
+        overlayPanelColor(darkOpacity: 0.98).setFill()
         NSBezierPath(roundedRect: localRail, xRadius: 12, yRadius: 12).fill()
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: localRail, xRadius: 12, yRadius: 12).stroke()
@@ -2180,7 +2188,7 @@ private final class ScreenshotSession {
         let globalPalette = moreColorPaletteRect()
         guard display.frame.contains(NSPoint(x: globalPalette.midX, y: globalPalette.midY)) else { return }
         let palette = local(globalPalette, on: display)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.98).setFill()
+        overlayPanelColor(darkOpacity: 0.98).setFill()
         NSBezierPath(roundedRect: palette, xRadius: 8, yRadius: 8).fill()
         NSColor.separatorColor.setStroke()
         NSBezierPath(roundedRect: palette, xRadius: 8, yRadius: 8).stroke()

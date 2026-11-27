@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum DeskPalette {
-    static let iceWhiteNS = NSColor(srgbRed: 240/255, green: 241/255, blue: 246/255, alpha: 1)
+    static let iceWhiteNS = NSColor.white
     static let iceWhite = Color(nsColor: iceWhiteNS)
 }
 

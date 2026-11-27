@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --ice-white: #f0f1f6;
+  --ice-white: #ffffff;
   --bg: var(--ice-white);
   --surface: var(--ice-white);
   --panel: var(--ice-white);
