@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+enum DeskPalette {
+    static let iceWhiteNS = NSColor(srgbRed: 240/255, green: 241/255, blue: 246/255, alpha: 1)
+    static let iceWhite = Color(nsColor: iceWhiteNS)
+}
+
 struct SettingsView: View {
     enum Page: String, CaseIterable, Identifiable {
         case overview, audio, screenshot, translation, displays, mouse, hotkeys, general
@@ -36,8 +41,8 @@ struct SettingsView: View {
     init(page: Binding<Page>) { _page = page }
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 250/255, green: 250/255, blue: 251/255) }
-    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
+    private var surface: Color { dark ? Color(white: 0.11) : DeskPalette.iceWhite }
+    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : DeskPalette.iceWhite }
     private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
     private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
 
@@ -109,7 +114,7 @@ struct SettingsView: View {
             .padding(.horizontal, 18)
         }
         .frame(height: 52)
-        .background(dark ? Color(red: 0.055, green: 0.086, blue: 0.13) : Color(red: 0.982, green: 0.989, blue: 0.998))
+        .background(dark ? Color(red: 0.055, green: 0.086, blue: 0.13) : DeskPalette.iceWhite)
         .overlay(alignment: .bottom) {
             Rectangle().fill(line).frame(height: 1)
         }
@@ -123,7 +128,7 @@ struct SettingsView: View {
                 Image(systemName: "sun.max.fill")
                     .foregroundStyle(dark ? Color.secondary : accent)
                     .frame(width: 25, height: 23)
-                    .background(dark ? Color.clear : panel, in: RoundedRectangle(cornerRadius: 6))
+                    .background(dark ? Color.clear : accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
                 Image(systemName: "moon.fill")
                     .foregroundStyle(dark ? accent : Color.secondary)
                     .frame(width: 25, height: 23)
@@ -934,6 +939,13 @@ private struct OverviewVolumeLevel: View {
     @State private var hovering = false
     @State private var editing = false
     @FocusState private var focused: Bool
+    @Environment(\.colorScheme) private var scheme
+
+    private var filledSegments: [Color] {
+        scheme == .dark
+            ? [Color(red: 129/255, green: 141/255, blue: 167/255), Color(red: 166/255, green: 177/255, blue: 202/255), Color(red: 194/255, green: 202/255, blue: 221/255)]
+            : [Color(red: 194/255, green: 202/255, blue: 221/255), Color(red: 157/255, green: 170/255, blue: 197/255), Color(red: 118/255, green: 133/255, blue: 163/255)]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -950,7 +962,7 @@ private struct OverviewVolumeLevel: View {
                         HStack(spacing: 2) {
                             ForEach(0..<40, id: \.self) { index in
                                 Rectangle().fill(index < Int((value * 40).rounded())
-                                    ? Color(red: 0.62, green: 0.67, blue: 0.77) : Color.secondary.opacity(0.2))
+                                    ? filledSegments[index * 3 / 40] : Color.secondary.opacity(0.2))
                             }
                         }
                         .frame(height: 14).frame(maxHeight: .infinity)

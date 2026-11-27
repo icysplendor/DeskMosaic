@@ -1,15 +1,16 @@
 :root {
   color-scheme: light;
-  --bg: #fafafb;
-  --surface: #fff;
-  --panel: #f9f9fb;
+  --ice-white: #f0f1f6;
+  --bg: var(--ice-white);
+  --surface: var(--ice-white);
+  --panel: var(--ice-white);
   --line: #dadce3;
   --text: #20212a;
   --muted: #636674;
   --accent: #4c5872;
   --selected: #e1e5ee;
-  --code: #f3f4f7;
-  --title: #f9f9fb;
+  --code: var(--ice-white);
+  --title: var(--ice-white);
   font:
     14px -apple-system,
     BlinkMacSystemFont,

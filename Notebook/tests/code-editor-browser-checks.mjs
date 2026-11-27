@@ -139,7 +139,7 @@ try {
       await page
         .locator(".cm-editor")
         .evaluate((e) => getComputedStyle(e).backgroundColor),
-      dark ? "rgb(38, 40, 50)" : "rgb(243, 244, 247)",
+      dark ? "rgb(38, 40, 50)" : "rgb(240, 241, 246)",
     );
     assert(
       (await page.locator(".cm-line span").count()) > 0,

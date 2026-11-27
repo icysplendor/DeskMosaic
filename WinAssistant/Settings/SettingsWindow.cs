@@ -109,7 +109,7 @@ internal sealed partial class SettingsWindow : Window
         Title = T("辅助工具控制中心", "Assistant Control Center");
         var dark = audioState?.Snapshot.Theme == "Dark";
         ThemeManager.ApplyWindowFrame(this, audioState?.Snapshot.Theme);
-        var appBrush = Brush(dark ? "#0B1422" : "#FAFAFB");
+        var appBrush = Brush(dark ? "#0B1422" : ThemeManager.IceWhite);
         var lineBrush = Brush(dark ? "#444754" : "#DADCE3");
         Background = appBrush;
         Foreground = Brush(dark ? "#F7F9FC" : "#161B28");
@@ -210,7 +210,7 @@ internal sealed partial class SettingsWindow : Window
         var bar = new Grid
         {
             Height = 52,
-            Background = Brush(dark ? "#1B1D25" : "#FAFAFC")
+            Background = Brush(dark ? "#1B1D25" : ThemeManager.IceWhite)
         };
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         bar.ColumnDefinitions.Add(new ColumnDefinition());
@@ -335,7 +335,7 @@ internal sealed partial class SettingsWindow : Window
             ToolTip = dark ? T("切换到浅色模式", "Switch to light mode") : T("切换到深色模式", "Switch to dark mode"),
             Margin = new Thickness(0, 9, 10, 9),
             Padding = new Thickness(3),
-            Background = Brush(dark ? "#20222C" : "#FFFFFF"),
+            Background = Brush(dark ? "#20222C" : ThemeManager.IceWhite),
             BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             Focusable = false
@@ -526,7 +526,7 @@ internal sealed partial class SettingsWindow : Window
             SelectedValuePath = nameof(AudioDeviceInfo.Id),
             SelectedValue = savedOutput?.Id ?? profile.OutputDeviceId,
             ToolTip = outputOnline ? T("输出设备", "Output device") : T("原输出设备未连接", "Saved output is offline"),
-            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            Background = Brush(dark ? "#262832" : ThemeManager.IceWhite),
             Foreground = Foreground,
             BorderBrush = Brush(dark ? "#46546A" : "#AEB8C8"),
             Height = 42,
@@ -550,7 +550,7 @@ internal sealed partial class SettingsWindow : Window
             SelectedValuePath = nameof(AudioDeviceInfo.Id),
             SelectedValue = savedInput?.Id ?? profile.InputDeviceId,
             ToolTip = inputOnline ? T("输入设备", "Input device") : T("原输入设备未连接", "Saved input is offline"),
-            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            Background = Brush(dark ? "#262832" : ThemeManager.IceWhite),
             Foreground = Foreground,
             BorderBrush = Brush(dark ? "#46546A" : "#AEB8C8"),
             Height = 42,
@@ -600,7 +600,7 @@ internal sealed partial class SettingsWindow : Window
         return new Border
         {
             Child = row,
-            Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : "#FFFFFF"),
+            Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : ThemeManager.IceWhite),
             BorderBrush = active ? Brush("#4C5872") : Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
@@ -713,7 +713,7 @@ internal sealed partial class SettingsWindow : Window
     {
         var border = new Border
         {
-            Background = device.IsDefault ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : "#FFFFFF"),
+            Background = device.IsDefault ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : ThemeManager.IceWhite),
             BorderBrush = device.IsDefault ? Brush("#4C5872") : Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
@@ -732,7 +732,7 @@ internal sealed partial class SettingsWindow : Window
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
             BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
-            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            Background = Brush(dark ? "#262832" : ThemeManager.IceWhite),
             Child = new TextBlock { Text = device.Kind == AudioDeviceKind.Output ? "OUT" : "IN", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = Brush("#4C5872"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
         });
         var labels = new StackPanel { Margin = new Thickness(14, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -970,7 +970,7 @@ internal sealed partial class SettingsWindow : Window
         preview.Children.Add(new TextBlock { Text = T("预览", "Preview"), FontSize = 12, Foreground = Muted(dark), Margin = new Thickness(0, 0, 0, 12) });
         preview.Children.Add(new Border { Height = Math.Min(12, defaults.StrokeWidth), Background = Brush(defaults.Color), CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 0, 0, 18) });
         preview.Children.Add(new TextBlock { Text = "Aa  标注文字 / Annotation", FontSize = Math.Min(32, defaults.FontSize), FontWeight = ScreenshotFontWeight(defaults.FontWeight), Foreground = Brush(defaults.Color), TextWrapping = TextWrapping.Wrap });
-        var previewCard = new Border { Child = preview, Background = Brush(dark ? "#20222C" : "#FFFFFF"), BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(18), Margin = new Thickness(28, 0, 0, 0) };
+        var previewCard = new Border { Child = preview, Background = Brush(dark ? "#20222C" : ThemeManager.IceWhite), BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(18), Margin = new Thickness(28, 0, 0, 0) };
         Grid.SetColumn(previewCard, 1);
         defaultsGrid.Children.Add(previewCard);
         var defaultsCard = WaccCard(defaultsGrid, dark);
@@ -1208,7 +1208,7 @@ internal sealed partial class SettingsWindow : Window
             panel.Children.Add(new Border
             {
                 Child = group, Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(8),
-                Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#262832" : "#FFFFFF"),
+                Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#262832" : ThemeManager.IceWhite),
                 BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1)
             });
         }
@@ -1653,7 +1653,7 @@ internal sealed partial class SettingsWindow : Window
     private Style BuildButtonStyle(bool dark)
     {
         var style = new Style(typeof(Button));
-        style.Setters.Add(new Setter(Control.BackgroundProperty, Brush(dark ? "#20222C" : "#FFFFFF")));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, Brush(dark ? "#20222C" : ThemeManager.IceWhite)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, Foreground));
         style.Setters.Add(new Setter(Control.BorderBrushProperty, Brush(dark ? "#444754" : "#DADCE3")));
         style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
@@ -1698,7 +1698,7 @@ internal sealed partial class SettingsWindow : Window
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
             BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
-            Background = Brush(dark ? "#262832" : "#FFFFFF")
+            Background = Brush(dark ? "#262832" : ThemeManager.IceWhite)
         };
     }
 
@@ -1709,7 +1709,7 @@ internal sealed partial class SettingsWindow : Window
         CornerRadius = new CornerRadius(8),
         BorderThickness = new Thickness(1),
         BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
-        Background = Brush(dark ? "#262832" : "#FFFFFF")
+        Background = Brush(dark ? "#262832" : ThemeManager.IceWhite)
     };
 
     private static SolidColorBrush Brush(string color)

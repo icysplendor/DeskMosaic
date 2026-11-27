@@ -68,8 +68,8 @@ internal sealed class TrayFlyoutWindow : Window
     private string T(string chinese, string english) => English ? english : chinese;
     private SolidColorBrush TextBrush(bool dark) => Brush(dark ? "#F7F9FC" : "#161B28");
     private SolidColorBrush MutedBrush(bool dark) => Brush(dark ? "#AEB8C8" : "#626B7C");
-    private SolidColorBrush PanelBrush(bool dark) => Brush(dark ? "#262832" : "#FFFFFF");
-    private SolidColorBrush SurfaceBrush(bool dark) => Brush(dark ? "#1B1D25" : "#FFFFFF");
+    private SolidColorBrush PanelBrush(bool dark) => Brush(dark ? "#262832" : ThemeManager.IceWhite);
+    private SolidColorBrush SurfaceBrush(bool dark) => Brush(dark ? "#1B1D25" : ThemeManager.IceWhite);
     private SolidColorBrush LineBrush(bool dark) => Brush(dark ? "#444754" : "#DADCE3");
 
     private void Render()
@@ -116,7 +116,7 @@ internal sealed class TrayFlyoutWindow : Window
         {
             Child = root,
             Padding = new Thickness(10),
-            Background = dark ? SurfaceBrush(true) : Brush("#FAFAFB"),
+            Background = dark ? SurfaceBrush(true) : Brush(ThemeManager.IceWhite),
             BorderBrush = LineBrush(dark),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),

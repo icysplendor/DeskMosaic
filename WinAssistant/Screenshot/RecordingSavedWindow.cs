@@ -1,3 +1,4 @@
+using WinAssistant.Audio.UI;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Automation;
@@ -18,7 +19,7 @@ internal sealed class RecordingSavedWindow : Window
         var dark = appearance.Theme == "Dark";
         var english = appearance.Language == "en-US";
         string Text(string chinese, string translated) => english ? translated : chinese;
-        var surface = Brush(dark ? "#20222C" : "#FFFFFF");
+        var surface = Brush(dark ? "#20222C" : ThemeManager.IceWhite);
         var foreground = Brush(dark ? "#F4F7FA" : "#152033");
         var muted = Brush(dark ? "#AEB8C8" : "#626B7C");
         var line = Brush(dark ? "#444754" : "#DADCE3");
@@ -93,7 +94,7 @@ internal sealed class RecordingSavedWindow : Window
         {
             Child = file, Padding = new Thickness(12), Margin = new Thickness(18, 16, 18, 0),
             CornerRadius = new CornerRadius(8), BorderBrush = line, BorderThickness = new Thickness(1),
-            Background = Brush(dark ? "#152033" : "#FAFAFB")
+            Background = Brush(dark ? "#152033" : ThemeManager.IceWhite)
         });
 
         var error = new TextBlock

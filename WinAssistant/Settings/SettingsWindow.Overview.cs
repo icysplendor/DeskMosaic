@@ -1,3 +1,4 @@
+using WinAssistant.Audio.UI;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -121,8 +122,8 @@ internal sealed partial class SettingsWindow
         track.Children.Add(slider);
         // Keep the native slider for pointer, keyboard and accessibility input.
         // Reveal it while interacting so the thumb and focus ring stay visible.
-        var segments = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, IsHitTestVisible = false, Background = dark ? Brush("#262832") : Brushes.White };
-        var filled = Brush(dark ? "#A6B1CA" : "#9DAAC5");
+        var segments = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1, IsHitTestVisible = false, Background = Brush(dark ? "#262832" : ThemeManager.IceWhite) };
+        var filled = new[] { Brush(dark ? "#818DA7" : "#C2CADD"), Brush(dark ? "#A6B1CA" : "#9DAAC5"), Brush(dark ? "#C2CADD" : "#7685A3") };
         var empty = Brush(dark ? "#424654" : "#E6E8EF");
         for (var index = 0; index < 40; index++)
             segments.Children.Add(new Border { Height = 14, Margin = new Thickness(0, 0, 2, 0) });
@@ -130,7 +131,7 @@ internal sealed partial class SettingsWindow
         {
             var count = (int)Math.Round(value * 0.4);
             for (var index = 0; index < segments.Children.Count; index++)
-                ((Border)segments.Children[index]).Background = index < count ? filled : empty;
+                ((Border)segments.Children[index]).Background = index < count ? filled[index * filled.Length / segments.Children.Count] : empty;
         }
         void Reveal() => segments.Visibility = track.IsMouseOver || slider.IsKeyboardFocusWithin || slider.IsMouseCaptureWithin ? Visibility.Hidden : Visibility.Visible;
         track.MouseEnter += (_, _) => Reveal();

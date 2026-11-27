@@ -10,8 +10,8 @@ struct MenuContentView: View {
     @EnvironmentObject private var audio: AudioManager
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 250/255, green: 250/255, blue: 251/255) }
-    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
+    private var surface: Color { dark ? Color(white: 0.11) : DeskPalette.iceWhite }
+    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : DeskPalette.iceWhite }
     private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
     private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
 

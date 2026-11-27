@@ -1,3 +1,4 @@
+using WinAssistant.Audio.UI;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -102,9 +103,9 @@ internal sealed class TranslationWindow : Window
     private void Build(Action openSettings)
     {
         var dark = ConfigurationStore.Shared.Configuration.Audio.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase);
-        Background = ColorBrush(dark ? "#20222C" : "#FAFAFB");
+        Background = ColorBrush(dark ? "#20222C" : ThemeManager.IceWhite);
         Resources["CaptionText"] = Foreground = ColorBrush(dark ? "#ECF2FA" : "#172235");
-        Resources["CaptionSurface"] = ColorBrush(dark ? "#262832" : "#FFFFFF");
+        Resources["CaptionSurface"] = ColorBrush(dark ? "#262832" : ThemeManager.IceWhite);
         Resources["CaptionMuted"] = ColorBrush(dark ? "#AABBD0" : "#52627A");
         Resources["CaptionLine"] = ColorBrush(dark ? "#444754" : "#DADCE3");
         Resources["CaptionHighlight"] = ColorBrush(dark ? "#393E50" : "#E1E5EE");

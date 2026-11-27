@@ -400,7 +400,7 @@ private struct TranslationWindowView: View {
                 sessionOptionsRow
             }
             .padding(10)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+            .background(dark ? Color(nsColor: .windowBackgroundColor) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
             if let file = controller.audioFile {
                 Button { controller.chooseAudioFile() } label: {
                     Label(t("已选择 · ", "Selected · ") + file.lastPathComponent, systemImage: "waveform")
@@ -443,7 +443,7 @@ private struct TranslationWindowView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(dark ? Color(red: 0.08, green: 0.125, blue: 0.2) : .white, in: RoundedRectangle(cornerRadius: 8))
+            .background(dark ? Color(red: 0.08, green: 0.125, blue: 0.2) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line).allowsHitTesting(false))
             .overlay(alignment: controller.captions.isEmpty ? .center : .topLeading) {
                 if controller.captions.isEmpty || controller.failed {
@@ -487,7 +487,7 @@ private struct TranslationWindowView: View {
             }
             return true
         }
-        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 250/255, green: 250/255, blue: 251/255))
+        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : DeskPalette.iceWhite)
         .preferredColorScheme(dark ? .dark : .light)
         .sheet(isPresented: $confirmingClear) { clearConfirmation }
         .onChange(of: controller.sessionOptions.sessionSourceLanguages) { available in
@@ -681,7 +681,7 @@ private struct TranslationWindowView: View {
         }
         .padding(.horizontal, 8)
         .frame(width: width, height: 22)
-        .background(dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : .white,
+        .background(dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : DeskPalette.iceWhite,
                     in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(line).allowsHitTesting(false))
         .accessibilityHidden(true)
@@ -1120,7 +1120,7 @@ struct TranslationSettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        .background(settings.theme == "Dark" ? Color.primary.opacity(0.035) : DeskPalette.iceWhite, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12)))
     }
 
