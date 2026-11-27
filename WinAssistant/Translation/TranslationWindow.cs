@@ -116,11 +116,11 @@ internal sealed class TranslationWindow : Window
         });
         var root = new DockPanel { Margin = new Thickness(12) };
         var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var toolbar = new StackPanel { Orientation = Orientation.Horizontal };
+        var toolbar = new WrapPanel();
         DockPanel.SetDock(clear, Dock.Right);
         header.Children.Add(clear);
         header.Children.Add(toolbar);
-        DockPanel.SetDock(header, Dock.Top);
+        DockPanel.SetDock(header, Dock.Bottom);
         root.Children.Add(header);
 
         foreach (var picker in new[] { audioSource, sourceLanguage, targetLanguage })
@@ -149,7 +149,7 @@ internal sealed class TranslationWindow : Window
         audioSource.Margin = new Thickness(0, 0, 6, 0);
         audioSource.ToolTip = T("音源", "Audio source");
         AutomationProperties.SetName(audioSource, T("音源", "Audio source"));
-        toolbar.Children.Add(audioSource);
+
         var footer = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
         DockPanel.SetDock(footer, Dock.Bottom);
         var state = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
@@ -209,7 +209,8 @@ internal sealed class TranslationWindow : Window
         AutomationProperties.SetName(targetLanguage, T("目标语言", "Target language"));
         sourceLanguage.ToolTip = T("源语言", "Source language");
         targetLanguage.ToolTip = T("目标语言", "Target language");
-        var languages = new StackPanel { Orientation = Orientation.Horizontal };
+        var languages = new WrapPanel();
+        languages.Children.Add(audioSource);
         languages.Children.Add(sourceLanguage);
         languages.Children.Add(swapLanguages);
         languages.Children.Add(targetLanguage);
@@ -247,7 +248,14 @@ internal sealed class TranslationWindow : Window
         twoWay.Margin = new Thickness(8, 0, 0, 0);
         languages.Children.Add(start);
         languages.Children.Add(twoWay);
-        footer.Children.Add(languages);
+        var setup = new Border
+        {
+            Child = languages, Padding = new Thickness(8), Background = (Brush)Resources["CaptionSurface"],
+            BorderBrush = Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        DockPanel.SetDock(setup, Dock.Top);
+        root.Children.Insert(0, setup);
 
         foreach (var picker in new[] { compute, originalSize, translationSize })
             picker.Style = (Style)Resources["CaptionPicker"];
@@ -270,13 +278,13 @@ internal sealed class TranslationWindow : Window
         AddPreference(T("原文", "Source"), T("原文字号", "Source size"), originalSize);
         AddPreference(T("译文", "Target"), T("译文字号", "Translation size"), translationSize);
         toolbar.Children.Add(showSource);
-        toolbar.Children.Add(export);
-        toolbar.Children.Add(settings);
+        languages.Children.Add(export);
+        languages.Children.Add(settings);
 
         var captionSurface = new Grid();
         captions.Margin = new Thickness(8);
         captionSurface.Children.Add(history);
-        empty.Text = T("开始后，字幕会显示在这里", "Captions will appear when you start");
+        empty.Text = T("选择音源和语言，然后开始录写。", "Choose an audio source and languages, then start transcription.");
         empty.Foreground = Muted;
         captionSurface.Children.Add(empty);
         root.Children.Add(new Border
@@ -313,7 +321,7 @@ internal sealed class TranslationWindow : Window
         fileNotice.Margin = new Thickness(0, 0, 0, 8);
         fileNotice.Click += (_, _) => ChooseAudioFile();
         DockPanel.SetDock(fileNotice, Dock.Top);
-        root.Children.Insert(2, fileNotice);
+        root.Children.Insert(root.Children.Count - 1, fileNotice);
         AllowDrop = true;
         PreviewDragOver += (_, args) =>
         {

@@ -1,5 +1,5 @@
 /* Build injects a content-hashed, immutable editor asset list. No authenticated API is cached. */
-const CACHE = "notes-shell-b14ef137450dbcd8";
+const CACHE = "notes-shell-12e9dbed321d29ea";
 const ASSETS = ["/index.html","/app.js","/style.css","/app-icon.png","/app-emblem.png","/app-icon-256.png","/app-icon-512.png","/manifest.webmanifest","/vendor/vditor/dist/index.css","/vendor/vditor/dist/index.min.js","/vendor/vditor/dist/js/icons/ant.js","/vendor/vditor/dist/js/lute/lute.min.js","/vendor/vditor/dist/js/i18n/zh_CN.js","/vendor/vditor/dist/css/content-theme/light.css","/vendor/vditor/dist/css/content-theme/dark.css","/vendor/vditor/dist/js/highlight.js/highlight.min.js","/vendor/vditor/dist/js/highlight.js/third-languages.js","/vendor/vditor/dist/js/highlight.js/styles/github.min.css","/vendor/vditor/dist/js/highlight.js/styles/github-dark.min.css"];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS))));
 // New versions activate on the next launch, never halfway through editing.

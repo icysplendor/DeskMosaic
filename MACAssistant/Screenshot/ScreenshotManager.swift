@@ -52,7 +52,8 @@ final class ScreenshotManager {
             displays: displays,
             windowCandidates: WindowCandidate.current(excluding: ProcessInfo.processInfo.processIdentifier),
             annotationDefaults: annotationDefaults,
-            recordingSettings: configuration.regionRecording
+            recordingSettings: configuration.regionRecording,
+            englishToolbar: SettingsManager.shared.language == "en-US"
         )
         captureSession.onCancel = { [weak self] in self?.closeCapture() }
         captureSession.onSave = { [weak self] in self?.closeCapture() }
@@ -460,6 +461,9 @@ private final class ScreenshotSession {
     private var textInputBounds = NSRect.zero
     private var textInputField: ScreenshotTextEditor?
     private var explicitOutputPixelSize: NSSize?
+    private let englishToolbar: Bool
+    private var feedbackStart: TimeInterval = 0
+    private var feedbackButton: Int?
     private var selectedColor = NSColor.systemRed
     private var selectedStrokeWidth: CGFloat = 3
     private var selectedFontSize: CGFloat = 18
@@ -518,8 +522,10 @@ private final class ScreenshotSession {
         displays: [CapturedDisplay],
         windowCandidates: [WindowCandidate],
         annotationDefaults: ScreenshotAnnotationDefaults,
-        recordingSettings: RegionRecordingSettings
+        recordingSettings: RegionRecordingSettings,
+        englishToolbar: Bool
     ) {
+        self.englishToolbar = englishToolbar
         self.displays = displays
         self.windowCandidates = windowCandidates
         self.recordingSettings = recordingSettings
@@ -951,7 +957,7 @@ private final class ScreenshotSession {
         let effectiveSelection = selection ?? hoverCandidate
         guard let globalSelection = effectiveSelection else {
             if display.frame.contains(NSEvent.mouseLocation) {
-                drawInstruction("移动鼠标选择窗口，或拖动选择任意区域", in: view)
+                drawInstruction(englishToolbar ? "Click a window or drag to select an area   ·   Esc to cancel" : "单击窗口或拖动框选区域　·　Esc 取消", in: view)
             }
             return
         }
@@ -1311,10 +1317,15 @@ private final class ScreenshotSession {
                 alert.icon = checkmark.withSymbolConfiguration(.init(paletteColors: [.systemGreen])) ?? checkmark
             }
             let folder = url.deletingLastPathComponent().path
-            let details = NSView(frame: NSRect(x: 0, y: 0, width: 330, height: 45))
+            let details = NSView(frame: NSRect(x: 0, y: 0, width: 330, height: 68))
+            let fileType = NSTextField(labelWithString: "MP4")
+            fileType.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
+            fileType.textColor = .secondaryLabelColor
+            fileType.frame = NSRect(x: 0, y: 49, width: 330, height: 16)
+            details.addSubview(fileType)
             let filename = NSTextField(labelWithString: url.lastPathComponent)
             filename.frame = NSRect(x: 0, y: 24, width: 330, height: 19)
-            filename.font = .systemFont(ofSize: 13, weight: .semibold)
+            filename.font = .systemFont(ofSize: 15, weight: .semibold)
             filename.cell?.lineBreakMode = .byTruncatingMiddle
             filename.toolTip = url.path
             details.addSubview(filename)
@@ -1623,8 +1634,12 @@ private final class ScreenshotSession {
     }
 
     private var toolbarTitles: [String] {
-        let actions = recording == nil ? [isStartingRecording ? "启动中" : "录屏", "完成"] : ["完成", "操作", "停止"]
-        return ScreenshotTool.allCases.map(\.title) + ["", "", "像素", "撤销", "保存"] + actions
+        if englishToolbar {
+            let actions = recording == nil ? [isStartingRecording ? "Starting" : "Record", "Done"] : ["Finish", "Interact", "Stop"]
+            return ["Rect", "Arrow", "Pen", "Text ▾", "Mosaic ▾", "", "", "Pixels", "Undo", "Save"] + actions
+        }
+        let actions = recording == nil ? [isStartingRecording ? "启动中" : "录屏", "完成"] : ["完成", "操作桌面", "停止"]
+        return ["矩形", "箭头", "画笔", "文字 ▾", "马赛克 ▾", "", "", "像素", "撤销", "保存"] + actions
     }
 
     private var compactPaletteButtonIndex: Int {
@@ -1655,9 +1670,9 @@ private final class ScreenshotSession {
     private var recordButtonIndex: Int { saveButtonIndex + (recording == nil ? 1 : 3) }
 
     private func toolbarButtonWidth(index: Int) -> CGFloat {
-        if index == recordButtonIndex { return 50 }
+        if index == desktopButtonIndex { return 66 }
         if index < ScreenshotTool.allCases.count, ScreenshotTool.allCases[index] == .mosaic {
-            return 58
+            return 66
         }
         if index == compactPaletteButtonIndex {
             return 44
@@ -1665,7 +1680,7 @@ private final class ScreenshotSession {
         if index == strokeSizeButtonIndex {
             return 48
         }
-        return 38
+        return englishToolbar ? 54 : 46
     }
 
     private var preferredToolbarWidth: CGFloat {
@@ -1677,7 +1692,7 @@ private final class ScreenshotSession {
     private func toolbarRect() -> NSRect {
         guard let selection else { return .zero }
         let width = preferredToolbarWidth
-        let height: CGFloat = 38
+        let height: CGFloat = 42
         let targetDisplay = displays.max {
             $0.frame.intersection(selection).area < $1.frame.intersection(selection).area
         } ?? displays[0]
@@ -1720,14 +1735,31 @@ private final class ScreenshotSession {
 
         for (index, title) in toolbarTitles.enumerated() {
             let rect = local(toolbarButtonRect(index: index), on: display)
+            let inset = rect.insetBy(dx: 2, dy: 4)
+            if [compactPaletteButtonIndex, sizeButtonIndex, saveButtonIndex].contains(index) {
+                NSColor.separatorColor.setFill()
+                NSRect(x: rect.minX, y: rect.minY + 10, width: 1, height: rect.height - 20).fill()
+            }
+            if index == finishButtonIndex && recording == nil {
+                NSColor(calibratedRed: 253/255, green: 244/255, blue: 165/255, alpha: 1).setFill()
+                NSBezierPath(roundedRect: inset, xRadius: 5, yRadius: 5).fill()
+            } else if index == recordButtonIndex && recording != nil {
+                NSColor.systemRed.setFill()
+                NSBezierPath(roundedRect: inset, xRadius: 5, yRadius: 5).fill()
+            }
             if index < ScreenshotTool.allCases.count,
                ScreenshotTool.allCases[index] == activeTool {
-                NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+                NSColor(calibratedRed: 0.65, green: 0.69, blue: 0.77, alpha: 0.38).setFill()
                 NSBezierPath(roundedRect: rect.insetBy(dx: 2, dy: 3), xRadius: 5, yRadius: 5).fill()
             } else if index == sizeButtonIndex && sizeInputStage != nil
                         || recording != nil && index == desktopButtonIndex && activeTool == nil {
-                NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+                NSColor(calibratedRed: 0.65, green: 0.69, blue: 0.77, alpha: 0.38).setFill()
                 NSBezierPath(roundedRect: rect.insetBy(dx: 2, dy: 3), xRadius: 5, yRadius: 5).fill()
+            }
+            if feedbackButton == index {
+                let remaining = max(0, 1 - (ProcessInfo.processInfo.systemUptime - feedbackStart) / 0.13)
+                NSColor.gray.withAlphaComponent(0.35 * remaining).setFill()
+                NSBezierPath(roundedRect: inset, xRadius: 5, yRadius: 5).fill()
             }
             if index == compactPaletteButtonIndex {
                 drawCompactPalette(in: rect, on: display)
@@ -1741,16 +1773,8 @@ private final class ScreenshotSession {
                 .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                 .foregroundColor: toolbarTitleColor(index: index)
             ]
-            let displayedTitle: String
-            if index < ScreenshotTool.allCases.count, ScreenshotTool.allCases[index] == .text {
-                displayedTitle = "文字↕"
-            } else if index < ScreenshotTool.allCases.count, ScreenshotTool.allCases[index] == .mosaic {
-                displayedTitle = "马赛克↕"
-            } else {
-                displayedTitle = title
-            }
-            let size = displayedTitle.size(withAttributes: attributes)
-            displayedTitle.draw(
+            let size = title.size(withAttributes: attributes)
+            title.draw(
                 at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2),
                 withAttributes: attributes
             )
@@ -1762,13 +1786,32 @@ private final class ScreenshotSession {
 
     private func toolbarTitleColor(index: Int) -> NSColor {
         if locksSelection, index == sizeButtonIndex || index == saveButtonIndex { return .disabledControlTextColor }
-        if index == recordButtonIndex { return .systemRed }
-        return index == finishButtonIndex ? .controlAccentColor : .labelColor
+        if index == recordButtonIndex && recording != nil { return .white }
+        if index == finishButtonIndex && recording == nil { return .black }
+        return .labelColor
+    }
+
+    private func pulseToolbar(_ index: Int) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let start = ProcessInfo.processInfo.systemUptime
+        feedbackStart = start
+        feedbackButton = index
+        func tick() {
+            guard feedbackStart == start, !views.isEmpty else { return }
+            views.forEach { $0.needsDisplay = true }
+            if ProcessInfo.processInfo.systemUptime - start < 0.13 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { tick() }
+            } else {
+                feedbackButton = nil
+            }
+        }
+        tick()
     }
 
     private func handleToolbarClick(at point: NSPoint) -> Bool {
         guard selection != nil, toolbarRect().contains(point) else { return false }
         for index in toolbarTitles.indices where toolbarButtonRect(index: index).contains(point) {
+            pulseToolbar(index)
             if index != sizeButtonIndex {
                 cancelSizeInput()
             }
@@ -1994,7 +2037,7 @@ private final class ScreenshotSession {
         for row in 0..<rows {
             let rect = local(rects[row], on: display).insetBy(dx: 2, dy: 2)
             if pickerSelectionIndex == row {
-                NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+                NSColor(calibratedRed: 0.65, green: 0.69, blue: 0.77, alpha: 0.38).setFill()
                 NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8).fill()
             }
             if activePicker == .color {
@@ -2225,7 +2268,7 @@ private final class ScreenshotSession {
 
     private func commitSizeInput(stage: SizeInputStage) {
         guard let value = Int(sizeInputBuffer), value > 0 else {
-            sizeInputError = "请输入大于 0 的数字"
+            sizeInputError = englishToolbar ? "Enter a number greater than zero" : "请输入大于 0 的数字"
             NSSound.beep()
             redraw()
             return
@@ -2237,7 +2280,7 @@ private final class ScreenshotSession {
         switch stage {
         case .width:
             guard value <= maximumWidth else {
-                sizeInputError = "宽度最大 \(maximumWidth) px"
+                sizeInputError = englishToolbar ? "Maximum width: \(maximumWidth) px" : "宽度最大 \(maximumWidth) px"
                 NSSound.beep()
                 redraw()
                 return
@@ -2255,7 +2298,7 @@ private final class ScreenshotSession {
                 return
             }
             guard value <= maximumHeight else {
-                sizeInputError = "高度最大 \(maximumHeight) px"
+                sizeInputError = englishToolbar ? "Maximum height: \(maximumHeight) px" : "高度最大 \(maximumHeight) px"
                 NSSound.beep()
                 redraw()
                 return
@@ -2325,12 +2368,12 @@ private final class ScreenshotSession {
             let input = sizeInputBuffer.isEmpty ? "…" : sizeInputBuffer
             switch sizeInputStage {
             case .width:
-                text = "正在输入宽度：\(input) px  按回车继续"
+                text = englishToolbar ? "Width: \(input) px · Enter for height" : "正在输入宽度：\(input) px  按回车继续"
             case .height:
-                text = "宽度 \(pendingInputWidth ?? pixelSize.width) px · 正在输入高度：\(input) px  按回车应用"
+                text = englishToolbar ? "Height: \(input) px · Enter to apply" : "宽度 \(pendingInputWidth ?? pixelSize.width) px · 正在输入高度：\(input) px  按回车应用"
             }
         } else if let recording {
-            text = "录像 \(recording.width) × \(recording.height)"
+            text = (englishToolbar ? "Recording " : "录像 ") + "\(recording.width) × \(recording.height)"
         } else {
             text = "\(pixelSize.width) × \(pixelSize.height)"
         }

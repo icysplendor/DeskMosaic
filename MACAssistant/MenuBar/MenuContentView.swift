@@ -17,6 +17,20 @@ struct MenuContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image("AppEmblem").resizable().frame(width: 22, height: 22)
+                Text("DeskMosaic").font(.headline)
+                Spacer()
+                Button(t("控制中心", "Control center")) {
+                    performAfterDismiss { SettingsWindowController.shared.show() }
+                }.buttonStyle(DeskPlainButtonStyle())
+            }
+            Divider()
+            HStack(spacing: 6) {
+                footerButton(t("框选截图", "Capture area")) { ScreenshotManager.shared.startCapture() }
+                footerButton(t("笔记本", "Notebook")) { NotebookWindowController.shared.show() }
+                footerButton(t("录写/翻译", "Speech")) { TranslationWindowController.shared.show() }
+            }
             if audio.isEnabled {
                 currentDevices
                 ScrollView {
@@ -203,23 +217,15 @@ struct MenuContentView: View {
     }
 
     private var footer: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                footerButton(t("截图", "Capture")) { ScreenshotManager.shared.startCapture() }
-                footerButton(t("笔记本", "Notebook")) { NotebookWindowController.shared.show() }
-                footerButton(t("录写/翻译", "Speech")) { TranslationWindowController.shared.show() }
+        HStack {
+            Spacer()
+            Button(appDelegate.isPreparingToQuit ? t("正在退出…", "Quitting…") : t("退出 DeskMosaic", "Quit DeskMosaic")) {
+                performAfterDismiss { NSApp.terminate(nil) }
             }
-            HStack(spacing: 8) {
-                footerButton(t("设置", "Settings")) { SettingsWindowController.shared.show() }
-                footerButton(appDelegate.isPreparingToQuit ? t("正在退出…", "Quitting…") : t("退出", "Quit")) {
-                    NSApp.terminate(nil)
-                }
-                .disabled(appDelegate.isPreparingToQuit)
-            }
+            .buttonStyle(DeskPlainButtonStyle())
+            .font(.caption).foregroundStyle(.secondary)
+            .disabled(appDelegate.isPreparingToQuit)
         }
-        .padding(8)
-        .background(panel, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
     }
 
     private func footerButton(_ title: String, action: @escaping @MainActor () -> Void) -> some View {

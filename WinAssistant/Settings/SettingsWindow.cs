@@ -75,6 +75,10 @@ internal sealed partial class SettingsWindow : Window
             CornerRadius = new CornerRadius(10),
             UseAeroCaptionButtons = false
         });
+        Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/Settings/SwitchStyles.xaml")
+        });
         FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
         PreviewKeyDown += HandlePreviewKeyDown;
         Deactivated += (_, _) => EndRecording();
@@ -405,10 +409,10 @@ internal sealed partial class SettingsWindow : Window
         shortcutButtons.Clear();
         var snapshot = audioState.Snapshot;
         var root = new StackPanel();
-        root.Children.Add(BuildAudioMasterSwitch(snapshot, dark));
-        root.Children.Add(BuildProfileRecoverySwitch(snapshot, dark));
         if (!snapshot.AudioEnabled)
         {
+            root.Children.Add(BuildAudioMasterSwitch(snapshot, dark));
+            root.Children.Add(BuildProfileRecoverySwitch(snapshot, dark));
             root.Children.Add(WaccCard(new TextBlock
             {
                 Text = T("音频功能已关闭。设备枚举、音量监听、设备锁定恢复和音频配置组快捷键均已停止。", "Audio is off. Device discovery, volume monitoring, lock recovery, and audio profile hotkeys are stopped."),
@@ -419,6 +423,8 @@ internal sealed partial class SettingsWindow : Window
         }
         root.Children.Add(BuildCompactCurrentDetails(snapshot, dark));
         root.Children.Add(BuildAudioProfiles(snapshot, dark));
+        root.Children.Add(BuildAudioMasterSwitch(snapshot, dark));
+        root.Children.Add(BuildProfileRecoverySwitch(snapshot, dark));
         return root;
     }
 
@@ -847,22 +853,34 @@ internal sealed partial class SettingsWindow : Window
         return grid;
     }
 
+    private bool showRecordingSettings;
+
     private UIElement BuildScreenshotPage(bool dark)
     {
         var root = new StackPanel();
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition());
-        var action = new Button { Content = T("立即截图", "Capture now"), Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 18, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brush("#4C5872"), Foreground = Brushes.White, BorderBrush = Brush("#4C5872") };
-        action.Click += (_, _) => captureAction();
-        var captureCard = Card(T("截图工作台", "Capture workspace"), T("框选任意显示器上的区域，然后使用标注工具、精确像素尺寸、撤销、保存和剪贴板输出。", "Select a region on any display, then annotate, set exact pixel size, undo, save, or copy it."), dark, action);
-        captureCard.Margin = new Thickness(0, 0, 9, 0);
-        grid.Children.Add(captureCard);
-        var behavior = Card(T("完整能力", "Everything included"), T("多显示器 · 智能窗口选择 · 八向缩放\n画笔 · 矩形 · 箭头 · 文字 · 马赛克\n颜色选择 · 精确尺寸 · 撤销 · 取消/完成", "Multi-display · smart window selection · 8-way resize\nPen · rectangle · arrow · text · mosaic\nColors · exact size · undo · cancel/finish"), dark);
-        behavior.Margin = new Thickness(9, 0, 0, 0);
-        Grid.SetColumn(behavior, 1);
-        grid.Children.Add(behavior);
-        root.Children.Add(grid);
+        var bar = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var action = OverviewButton(T("开始框选截图", "Select region to capture"), captureAction, primary: true);
+        DockPanel.SetDock(action, Dock.Right);
+        bar.Children.Add(action);
+        var choices = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var recording in new[] { false, true })
+        {
+            var tab = new Button
+            {
+                Content = recording ? T("录屏文件", "Recording files") : T("截图标注", "Annotations"),
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+            if (recording == showRecordingSettings) { tab.Background = Brush("#4C5872"); tab.Foreground = Brushes.White; }
+            tab.Click += (_, _) => { showRecordingSettings = recording; Render(); };
+            choices.Children.Add(tab);
+        }
+        bar.Children.Add(choices);
+        root.Children.Add(bar);
+        if (showRecordingSettings)
+        {
+            root.Children.Add(WaccCard(BuildRegionRecordingSettings(), dark));
+            return root;
+        }
 
         var defaults = ConfigurationStore.Shared.Configuration.ScreenshotDefaults;
         var defaultsGrid = new Grid();
@@ -958,9 +976,6 @@ internal sealed partial class SettingsWindow : Window
         var defaultsCard = WaccCard(defaultsGrid, dark);
         defaultsCard.Margin = new Thickness(0, 16, 0, 0);
         root.Children.Add(defaultsCard);
-        var recordingCard = WaccCard(BuildRegionRecordingSettings(), dark);
-        recordingCard.Margin = new Thickness(0, 16, 0, 0);
-        root.Children.Add(recordingCard);
         return root;
     }
 
@@ -1052,10 +1067,17 @@ internal sealed partial class SettingsWindow : Window
     {
         shortcutButtons.Clear();
         var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = T("打开工具", "Open a tool"), FontWeight = FontWeights.SemiBold });
         panel.Children.Add(ShortcutRow(RecordingTarget.Screenshot, T("开始截图", "Start capture"), T("跨显示器截图与标注", "Cross-screen capture and annotation")));
         panel.Children.Add(ShortcutRow(RecordingTarget.NotebookLast, T("打开上次笔记页面", "Open last notebook page"), T("恢复上次打开的笔记", "Restore the last opened note")));
         panel.Children.Add(ShortcutRow(RecordingTarget.Translation, T("打开录写/翻译", "Open Transcribe / Translate"), T("显示录写/翻译窗口", "Show the transcription and translation window")));
         panel.Children.Add(ShortcutRow(RecordingTarget.NotebookQuick, T("打开快速笔记", "Open Quick Notes"), T("在固定笔记本中随手记录", "Write in the fixed Quick Notes notebook")));
+        var root = new StackPanel();
+        var toolsCard = WaccCard(panel, dark);
+        toolsCard.Margin = new Thickness(0, 0, 0, 10);
+        root.Children.Add(toolsCard);
+        panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = T("切换设备", "Switch devices"), FontWeight = FontWeights.SemiBold });
         if (audioState?.Snapshot.AudioEnabled == true)
         {
             panel.Children.Add(ShortcutRow(RecordingTarget.NextProfile, T("下一个音频配置组", "Next audio profile"), T("整体切换输出和输入设备", "Switch the output and input pair together")));
@@ -1067,15 +1089,8 @@ internal sealed partial class SettingsWindow : Window
         }
         statusText = new TextBlock { Foreground = Brushes.IndianRed, Margin = new Thickness(0, 18, 0, 0), TextWrapping = TextWrapping.Wrap };
         panel.Children.Add(statusText);
-        return new Border
-        {
-            Child = panel,
-            Padding = new Thickness(16),
-            Background = Brush(dark ? "#262832" : "#FFFFFF"),
-            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8)
-        };
+        root.Children.Add(WaccCard(panel, dark));
+        return root;
     }
 
     internal void ShowTranslationPage()
@@ -1086,6 +1101,8 @@ internal sealed partial class SettingsWindow : Window
 
     private readonly Dictionary<TranslationModelDownload, int> modelDownloads = new();
     private readonly Dictionary<TranslationModelDownload, string> modelDownloadErrors = new();
+
+    private readonly HashSet<int> expandedModelSections = new() { 0 };
 
     private UIElement BuildTranslationPage(bool dark)
     {
@@ -1184,13 +1201,13 @@ internal sealed partial class SettingsWindow : Window
         void BeginSection(string title)
         {
             section = new StackPanel();
-            section.Children.Add(new TextBlock
-            {
-                Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12)
-            });
+            var index = panel.Children.Count;
+            var group = new Expander { Header = title, IsExpanded = expandedModelSections.Contains(index), Content = section, Foreground = Foreground };
+            group.Expanded += (_, args) => { if (ReferenceEquals(args.OriginalSource, group)) expandedModelSections.Add(index); };
+            group.Collapsed += (_, args) => { if (ReferenceEquals(args.OriginalSource, group)) expandedModelSections.Remove(index); };
             panel.Children.Add(new Border
             {
-                Child = section, Padding = new Thickness(14, 12, 14, 4), CornerRadius = new CornerRadius(8),
+                Child = group, Padding = new Thickness(14, 12, 14, 12), CornerRadius = new CornerRadius(8),
                 Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#262832" : "#FFFFFF"),
                 BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1)
             });
@@ -1341,7 +1358,13 @@ internal sealed partial class SettingsWindow : Window
 
     private UIElement BuildGeneralPage(bool dark)
     {
+        var layout = new Grid();
+        layout.ColumnDefinitions.Add(new ColumnDefinition());
+        layout.ColumnDefinitions.Add(new ColumnDefinition());
         var panel = new StackPanel();
+        var display = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = T("后台运行", "Background operation"), FontSize = 16, FontWeight = FontWeights.SemiBold });
+        display.Children.Add(new TextBlock { Text = T("界面外观", "Appearance"), FontSize = 16, FontWeight = FontWeights.SemiBold });
         if (audioState is not null)
         {
             panel.Children.Add(BuildAudioMasterSwitch(audioState.Snapshot, dark));
@@ -1366,7 +1389,7 @@ internal sealed partial class SettingsWindow : Window
             if (theme.SelectedItem is string value) { audioState?.SetTheme(value); Render(); }
         };
         appearance.Children.Add(theme);
-        panel.Children.Add(appearance);
+        display.Children.Add(appearance);
 
         var language = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
         language.Children.Add(new TextBlock { Text = T("语言", "Language"), Width = 120, VerticalAlignment = VerticalAlignment.Center, Foreground = Foreground });
@@ -1377,16 +1400,14 @@ internal sealed partial class SettingsWindow : Window
             Render();
         };
         language.Children.Add(picker);
-        panel.Children.Add(language);
-        return new Border
-        {
-            Child = panel,
-            Padding = new Thickness(16),
-            Background = Brush(dark ? "#262832" : "#FFFFFF"),
-            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8)
-        };
+        display.Children.Add(language);
+        var background = WaccCard(panel, dark);
+        background.Margin = new Thickness(0, 0, 8, 0);
+        layout.Children.Add(background);
+        var visual = WaccCard(display, dark);
+        Grid.SetColumn(visual, 1);
+        layout.Children.Add(visual);
+        return layout;
     }
 
     private UIElement BuildAudioMasterSwitch(AppStateSnapshot snapshot, bool dark)

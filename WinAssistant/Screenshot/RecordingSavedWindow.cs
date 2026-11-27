@@ -18,11 +18,11 @@ internal sealed class RecordingSavedWindow : Window
         var dark = appearance.Theme == "Dark";
         var english = appearance.Language == "en-US";
         string Text(string chinese, string translated) => english ? translated : chinese;
-        var surface = Brush(dark ? "#111B2B" : "#FFFFFF");
+        var surface = Brush(dark ? "#20222C" : "#FFFFFF");
         var foreground = Brush(dark ? "#F4F7FA" : "#152033");
         var muted = Brush(dark ? "#AEB8C8" : "#626B7C");
-        var line = Brush(dark ? "#334158" : "#D9E1EC");
-        var accent = Brush("#246BFE");
+        var line = Brush(dark ? "#444754" : "#DADCE3");
+        var accent = Brush("#4C5872");
 
         Title = Text("区域录屏已保存", "Recording saved");
         Width = 460;
@@ -77,9 +77,10 @@ internal sealed class RecordingSavedWindow : Window
         body.Children.Add(new Border { Height = 1, Background = line });
 
         var file = new StackPanel();
+        file.Children.Add(new TextBlock { Text = "MP4", FontFamily = new FontFamily("Consolas"), Foreground = muted, Margin = new Thickness(0, 0, 0, 6) });
         file.Children.Add(new TextBlock
         {
-            Text = Path.GetFileName(path), FontWeight = FontWeights.SemiBold,
+            Text = Path.GetFileName(path), FontSize = 16, FontWeight = FontWeights.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = path
         });
         var folder = Path.GetDirectoryName(path);
@@ -92,7 +93,7 @@ internal sealed class RecordingSavedWindow : Window
         {
             Child = file, Padding = new Thickness(12), Margin = new Thickness(18, 16, 18, 0),
             CornerRadius = new CornerRadius(8), BorderBrush = line, BorderThickness = new Thickness(1),
-            Background = Brush(dark ? "#152033" : "#F8FBFF")
+            Background = Brush(dark ? "#152033" : "#F0F1F6")
         });
 
         var error = new TextBlock
@@ -145,6 +146,7 @@ internal sealed class RecordingSavedWindow : Window
         presenter.SetBinding(MarginProperty, new Binding("Padding") { RelativeSource = RelativeSource.TemplatedParent });
         border.AppendChild(presenter);
         var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
+        WinAssistant.Audio.UI.ButtonFeedback.Apply(template, "ButtonBorder");
         var hover = new Trigger { Property = IsMouseOverProperty, Value = true };
         hover.Setters.Add(new Setter(OpacityProperty, 0.84, "ButtonBorder"));
         template.Triggers.Add(hover);

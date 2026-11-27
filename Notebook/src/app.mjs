@@ -272,6 +272,10 @@ async function refresh() {
   catalog = await store.catalog();
   renderNavigation();
   renderNotes();
+  $("empty-title").textContent = catalog.notes.length ? "选择一篇笔记" : "写下第一篇笔记";
+  $("empty-hint").textContent = catalog.notes.length
+    ? "从列表打开已有笔记，或新建一篇。"
+    : "可以直接写进快速笔记，也可以先建一个笔记本。";
 }
 function renderNavigation() {
   $("book-list").replaceChildren();
@@ -336,7 +340,7 @@ function renderNotes() {
   }
   if (!notes.length)
     $("note-list").append(
-      label(search ? "没有匹配的笔记" : "点击上方按钮创建笔记", "p"),
+      label(search ? "没有匹配的笔记" : "还没有笔记", "p"),
     );
 }
 async function flush() {
@@ -2611,7 +2615,7 @@ async function startup() {
       await refresh();
     }
   });
-  $("new-note").onclick = protect(async () => {
+  $("new-note").onclick = $("empty-note").onclick = protect(async () => {
     let book =
       catalog.books.find((x) => x.id === bookId) ||
       catalog.books.find((x) => x.id === active?.bookId) ||

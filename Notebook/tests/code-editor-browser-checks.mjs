@@ -139,7 +139,7 @@ try {
       await page
         .locator(".cm-editor")
         .evaluate((e) => getComputedStyle(e).backgroundColor),
-      dark ? "rgb(21, 32, 51)" : "rgb(245, 248, 253)",
+      dark ? "rgb(38, 40, 50)" : "rgb(243, 244, 247)",
     );
     assert(
       (await page.locator(".cm-line span").count()) > 0,
@@ -170,7 +170,7 @@ try {
         .locator(".cm-selectionBackground")
         .first()
         .evaluate((e) => getComputedStyle(e).backgroundColor),
-      dark ? "rgb(32, 56, 87)" : "rgb(232, 241, 255)",
+      dark ? "rgb(57, 62, 80)" : "rgb(225, 229, 238)",
     );
     await page.keyboard.press("Backspace");
     assert.equal(

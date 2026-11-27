@@ -97,7 +97,7 @@ internal sealed partial class SettingsWindow
         }
         else levels.Children.Add(OverviewButton(T("音频设置", "Audio settings"), OpenAudio));
         var actions = Section(T("常用操作", "Quick actions"), 1, 1, 2);
-        actions.Children.Add(OverviewButton(T("新建快速笔记", "New quick note"), quickNote));
+        actions.Children.Add(OverviewButton(T("打开快速笔记", "Open quick notes"), quickNote));
         actions.Children.Add(OverviewButton(T("打开笔记本", "Open notebook"), openNotebook));
         actions.Children.Add(OverviewButton(T("打开录写与翻译", "Open transcription and translation"), openTranslation));
         return root;

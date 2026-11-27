@@ -184,7 +184,9 @@ internal sealed class NotebookWindow : Window
             root.AppendChild(presenter); template.VisualTree = root;
             var hover = new Trigger { Property = IsMouseOverProperty, Value = true };
             hover.Setters.Add(new Setter(Border.BackgroundProperty, help == "关闭笔记窗口" ? Brushes.Firebrick : line, "captionBackground"));
-            template.Triggers.Add(hover); button.Template = template;
+            template.Triggers.Add(hover);
+            ButtonFeedback.Apply(template, "captionBackground");
+            button.Template = template;
             button.Click += (_, _) => action(); commands.Children.Add(button);
         }
         Add("◐", "切换主题", () => { if (ready) _ = browser.ExecuteScriptAsync("document.getElementById('theme').click()"); });

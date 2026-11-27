@@ -80,16 +80,20 @@ internal sealed class TrayFlyoutWindow : Window
         Foreground = TextBrush(dark);
         Resources[typeof(Button)] = BuildButtonStyle(dark);
 
-        var root = new Grid();
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var root = new StackPanel();
+        var header = new DockPanel { Margin = new Thickness(4, 0, 4, 8) };
+        var settings = new Button { Content = T("控制中心", "Control center"), Padding = new Thickness(8, 3, 8, 3) };
+        settings.Click += (_, _) => { Hide(); openSettings(); };
+        DockPanel.SetDock(settings, Dock.Right);
+        header.Children.Add(settings);
+        header.Children.Add(new TextBlock { Text = "DeskMosaic", FontSize = 16, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        root.Children.Add(header);
+        root.Children.Add(BuildQuickActions(dark));
 
         if (snapshot.AudioEnabled)
         {
             root.Children.Add(BuildCurrentCard(snapshot, dark));
             var deviceList = BuildProfiles(snapshot, dark);
-            Grid.SetRow(deviceList, 1);
             root.Children.Add(deviceList);
         }
         else
@@ -104,9 +108,9 @@ internal sealed class TrayFlyoutWindow : Window
             }, dark, new Thickness(0, 0, 0, 10));
             root.Children.Add(disabled);
         }
-        var footer = BuildFooter(dark);
-        Grid.SetRow(footer, 2);
-        root.Children.Add(footer);
+        var exit = new Button { Content = T("退出 DeskMosaic", "Quit DeskMosaic"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0), Padding = new Thickness(8, 3, 8, 3) };
+        exit.Click += (_, _) => { Hide(); quit(); };
+        root.Children.Add(exit);
 
         Content = new Border
         {
@@ -275,15 +279,12 @@ internal sealed class TrayFlyoutWindow : Window
         return border;
     }
 
-    private UIElement BuildFooter(bool dark)
+    private UIElement BuildQuickActions(bool dark)
     {
         var panel = new StackPanel();
-        panel.Children.Add(Row((T("截图", "Capture"), capture), (T("笔记本", "Notes"), openNotebook),
+        panel.Children.Add(Row((T("框选截图", "Capture area"), capture), (T("笔记本", "Notes"), openNotebook),
             (T("录写/翻译", "Speech"), openTranslation)));
-        var commands = Row((T("设置", "Settings"), openSettings), (T("退出", "Quit"), quit));
-        commands.Margin = new Thickness(0, 6, 0, 0);
-        panel.Children.Add(commands);
-        return InsetCard(panel, dark, new Thickness(0, 10, 0, 0), new Thickness(8));
+        return InsetCard(panel, dark, new Thickness(0, 0, 0, 8), new Thickness(4));
 
         Grid Row(params (string Label, Action Action)[] items)
         {

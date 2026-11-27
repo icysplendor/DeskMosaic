@@ -374,40 +374,33 @@ private struct TranslationWindowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
-                    (.system, t("电脑声音", "System audio")),
-                    (.microphone, t("麦克风", "Microphone")),
-                    (.both, t("电脑声＋麦克风", "System + mic")),
-                    (.file, t("导入音频", "Import audio"))
-                ], placeholder: t("请选择", "Select"))
-                .disabled(controller.running)
-                dropdown(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute), choices: [
-                    ("auto", t("自动", "Automatic")), ("cpu", "CPU"), ("gpu", t("优先 GPU", "Prefer GPU"))
-                ], placeholder: t("自动", "Automatic"))
-                .disabled(controller.running)
-                fontSizePicker(t("原文", "Source"), settings.translationBinding(\.sourceFontSize))
-                    .help(t("原文字号", "Source size"))
-                fontSizePicker(t("译文", "Target"), settings.translationBinding(\.targetFontSize))
-                    .help(t("译文字号", "Translation size"))
-                Toggle(t("显示原文", "Show source"), isOn: settings.translationBinding(\.showSource))
-                    .help(t("译文定稿后继续显示原文", "Keep the source visible after the translation is final"))
-                exportMenu
-                Button { controller.openSettings() } label: {
-                    Image(systemName: "gearshape")
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    dropdown(t("音源", "Audio source"), selection: audioSource, choices: [
+                        (.system, t("电脑声音", "System audio")),
+                        (.microphone, t("麦克风", "Microphone")),
+                        (.both, t("电脑声＋麦克风", "System + mic")),
+                        (.file, t("导入音频", "Import audio"))
+                    ], placeholder: t("请选择", "Select"))
+                    .disabled(controller.running)
+                    sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
+                        .disabled(controller.fileCompleted)
+                        .padding(.leading, 4)
+                    if !controller.running && !controller.fileCompleted {
+                        sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
+                            controller.toggle(twoWay: true)
+                        }
+                        .disabled(!canStartTwoWay)
+                        .help(twoWayHelp)
+                    }
+                    Spacer()
+                    exportMenu
+                    Button { controller.openSettings() } label: { Label(t("设置", "Settings"), systemImage: "gearshape") }
                 }
-                .accessibilityLabel(t("录写/翻译设置", "Transcribe / Translate settings"))
-                .help(t("录写/翻译设置", "Transcribe / Translate settings"))
-                Spacer(minLength: 0)
-                Button {
-                    confirmingClear = true
-                } label: {
-                    Label(t("清屏", "Clear"), systemImage: "trash")
-                }
-                .help(t("清空当前字幕", "Clear current captions"))
-                .disabled(controller.captions.isEmpty)
+                sessionOptionsRow
             }
-
+            .padding(10)
+            .background(.background, in: RoundedRectangle(cornerRadius: 8))
             if let file = controller.audioFile {
                 Button { controller.chooseAudioFile() } label: {
                     Label(t("已选择 · ", "Selected · ") + file.lastPathComponent, systemImage: "waveform")
@@ -455,14 +448,34 @@ private struct TranslationWindowView: View {
             .overlay(alignment: controller.captions.isEmpty ? .center : .topLeading) {
                 if controller.captions.isEmpty || controller.failed {
                     Text(controller.speechReady ? t("等待语音…", "Waiting for speech…")
-                         : (controller.status.isEmpty ? t("字幕会显示在这里", "Captions appear here") : controller.status))
+                         : (controller.status.isEmpty ? t("选择音源和语言，然后开始录写。", "Choose an audio source and languages, then start transcription.") : controller.status))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .padding(8)
                 }
             }
 
-            footer
+            HStack(spacing: 6) {
+                dropdown(t("推理设备", "Compute"), selection: settings.translationBinding(\.compute), choices: [
+                    ("auto", t("自动", "Automatic")), ("cpu", "CPU"), ("gpu", t("优先 GPU", "Prefer GPU"))
+                ], placeholder: t("自动", "Automatic"))
+                .disabled(controller.running)
+                fontSizePicker(t("原文", "Source"), settings.translationBinding(\.sourceFontSize))
+                    .help(t("原文字号", "Source size"))
+                fontSizePicker(t("译文", "Target"), settings.translationBinding(\.targetFontSize))
+                    .help(t("译文字号", "Translation size"))
+                Toggle(t("显示原文", "Show source"), isOn: settings.translationBinding(\.showSource))
+                    .help(t("译文定稿后继续显示原文", "Keep the source visible after the translation is final"))
+                Spacer(minLength: 0)
+                Button {
+                    confirmingClear = true
+                } label: {
+                    Label(t("清屏", "Clear"), systemImage: "trash")
+                }
+                .help(t("清空当前字幕", "Clear current captions"))
+                .disabled(controller.captions.isEmpty)
+            }
+
         }
         .padding(12)
         .frame(minWidth: 670, minHeight: 270)
@@ -489,7 +502,7 @@ private struct TranslationWindowView: View {
         }
     }
 
-    private var footer: some View {
+    private var sessionOptionsRow: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 languageDropdown(t("源语言", "Source language"), selection: $controller.sourceLanguage,
@@ -521,16 +534,6 @@ private struct TranslationWindowView: View {
                 .fixedSize()
                 .disabled(controller.running || controller.audioFile != nil)
             advancedReviewButton
-            sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
-                .disabled(controller.fileCompleted)
-                .padding(.leading, 4)
-            if !controller.running && !controller.fileCompleted {
-                sessionButton(t("互译", "Two-way"), tint: Color(red: 0.40, green: 0.26, blue: 0.72)) {
-                    controller.toggle(twoWay: true)
-                }
-                .disabled(!canStartTwoWay)
-                .help(twoWayHelp)
-            }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
                 Circle()
@@ -964,13 +967,14 @@ private struct SpeakerNameView: View {
 
 struct TranslationSettingsView: View {
     @EnvironmentObject private var settings: SettingsManager
+    @State private var openSections: Set<Int> = [0]
     @State private var downloading: Set<String> = []
     @State private var downloadErrors: [String: String] = [:]
 
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            section(t("实时识别", "Live recognition")) {
+            section(0, t("实时识别", "Live recognition")) {
                 settingRow(t("默认源语言", "Default source language")) {
                     Picker("", selection: Binding(
                         get: { settings.translationOptions.selectedSourceLanguage },
@@ -995,7 +999,7 @@ struct TranslationSettingsView: View {
                     set: { settings.translationBinding(\.onlineSpeakerModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.onlineSpeaker.url, type: UTType(filenameExtension: "gguf"), model: .onlineSpeaker)
             }
-            section(t("段末复核", "Second pass")) {
+            section(1, t("段末复核", "Second pass")) {
                 let mossReady = !settings.translationOptions.selectedMossModel.isEmpty
                 settingRow(t("启用段末复核", "Enable second pass")) {
                     Toggle("", isOn: settings.translationBinding(\.enableCorrection))
@@ -1020,7 +1024,7 @@ struct TranslationSettingsView: View {
                     set: { settings.translationBinding(\.mossModel).wrappedValue = $0 }
                 ), url: TranslationModelDownload.moss.url, type: UTType(filenameExtension: "gguf"), model: .moss)
             }
-            section(t("文本翻译", "Text translation")) {
+            section(2, t("文本翻译", "Text translation")) {
                 settingRow(t("默认目标语言", "Default target language")) {
                     Picker("", selection: Binding(
                         get: { settings.translationOptions.selectedTargetLanguage },
@@ -1062,7 +1066,7 @@ struct TranslationSettingsView: View {
                     }
                 ), url: TranslationModelDownload.lmt.url, type: UTType(filenameExtension: "gguf"), model: .lmt)
             }
-            section(t("音频与诊断", "Audio and diagnostics")) {
+            section(3, t("音频与诊断", "Audio and diagnostics")) {
                 settingRow(t("麦克风人声检测", "Microphone speech detection")) {
                     Picker("", selection: settings.translationBinding(\.microphoneFilter)) {
                         Text(t("温和", "Gentle")).tag("gentle")
@@ -1104,10 +1108,14 @@ struct TranslationSettingsView: View {
         .frame(minHeight: 26)
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func section<Content: View>(_ index: Int, _ title: String, @ViewBuilder content: () -> Content) -> some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { openSections.contains(index) },
+            set: { if $0 { openSections.insert(index) } else { openSections.remove(index) } }
+        )) {
+            VStack(alignment: .leading, spacing: 10, content: content).padding(.top, 8)
+        } label: {
             Text(title).font(.system(size: 15, weight: .semibold))
-            content()
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

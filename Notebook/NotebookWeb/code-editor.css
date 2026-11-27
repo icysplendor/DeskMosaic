@@ -1,7 +1,7 @@
 .code-window {
   height: 100dvh;
   display: grid;
-  grid-template-rows: 48px auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 .code-header {
   display: flex;
@@ -208,3 +208,16 @@
     gap: 4px 8px;
   }
 }
+
+.code-header { min-height: 52px; flex-wrap: wrap; padding-block: 6px; }
+.code-tool-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-inline: 1px solid var(--line);
+  padding-inline: 6px;
+}
+.code-actions .primary { background: #fdf4a5; color: #222431; }
+.code-actions .primary:disabled { opacity: .5; }
+.code-tools { background: var(--panel); }
+.code-footer { font-variant-numeric: tabular-nums; }

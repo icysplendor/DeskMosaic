@@ -77,7 +77,7 @@
         <div class="list-heading">
           <h2 id="list-title">全部笔记</h2>
           <button id="new-note" class="primary" aria-label="新建笔记">
-            <i data-lucide="plus"></i>
+            <i data-lucide="plus"></i><span>新建</span>
           </button>
         </div>
         <label class="search"
@@ -92,6 +92,7 @@
             ‹
           </button>
           <span id="breadcrumb">选择或新建笔记</span>
+          <div class="note-tools">
           <div class="mode-switch">
             <button id="preview-mode" class="active">可编辑预览</button
             ><button id="source-mode">源码</button>
@@ -101,6 +102,7 @@
           ><button id="note-actions" aria-label="笔记操作">
             <i data-lucide="ellipsis"></i>
           </button>
+          </div>
         </div>
         <section id="trash-page" hidden>
           <div class="trash-heading">
@@ -118,9 +120,12 @@
         </section>
         <div id="empty">
           <i data-lucide="notebook-pen"></i>
-          <h1>让正文和附件一起归档</h1>
-          <p>先创建一个笔记本，再写下第一篇笔记。</p>
-          <button id="empty-create" class="primary">新建笔记本</button>
+          <h1 id="empty-title">写下第一篇笔记</h1>
+          <p id="empty-hint">可以直接写进快速笔记，也可以先建一个笔记本。</p>
+          <div class="empty-actions">
+            <button id="empty-note" class="primary">新建笔记</button>
+            <button id="empty-create">新建笔记本</button>
+          </div>
         </div>
         <div id="mobile-edit-controls">
           <button id="mobile-edit" class="primary">开启编辑</button>

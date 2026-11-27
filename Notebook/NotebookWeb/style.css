@@ -374,6 +374,13 @@ main {
   text-align: center;
   color: var(--muted);
 }
+.note-tools, .empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+main:has(#empty:not([hidden])) .note-tools { display: none; }
+.empty-actions button:not(.primary) { border-color: var(--line); }
 #empty > .lucide {
   width: 48px;
   height: 48px;
@@ -589,6 +596,8 @@ dialog::backdrop {
   border-left: 3px solid #b57a18;
 }
 dialog h2 {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
   margin-bottom: 16px;
 }
 dialog label {
@@ -1503,5 +1512,31 @@ footer {
     padding-left: 6px;
     background: var(--panel);
     z-index: 6;
+  }
+}
+
+
+/* Keep native and desktop-web panes aligned while the library resizer is in use. */
+@media (min-width: 761px) {
+  #books { background: var(--bg); }
+  #notes { background: var(--surface); }
+  .list-heading { align-items: center; gap: 6px; margin-bottom: 10px; }
+  .list-heading h2 { font-size: 18px; overflow: hidden; text-overflow: ellipsis; }
+  #new-note { flex: none; font-size: 12px; padding: 5px 8px; }
+  .search { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .note-row { padding: 7px 12px; }
+  .note-row.active { background: var(--selected); }
+  #note-toolbar { justify-content: space-between; padding: 3px 10px; }
+  #breadcrumb { flex: 1 1 0; min-width: 0; font-size: 13px; color: var(--text); }
+  #empty { align-items: flex-start; padding: clamp(20px, 5vw, 72px); text-align: left; }
+  #empty h1 { font-size: clamp(24px, 3vw, 40px); font-weight: 500; margin: 16px 0 0; }
+  #empty p { max-width: 36em; line-height: 1.6; margin: 8px 0 18px; }
+  #trash-page { max-width: 980px; width: 100%; margin-inline: auto; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  dialog[open] { animation: notebook-dialog-in 140ms ease-out; }
+  @keyframes notebook-dialog-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }

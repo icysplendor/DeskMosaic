@@ -30,6 +30,7 @@ struct SettingsView: View {
     @EnvironmentObject private var mouseScroll: MouseScrollManager
     @EnvironmentObject private var settings: SettingsManager
     @EnvironmentObject private var audio: AudioManager
+    @State private var recordingSettings = false
     @Binding var page: Page
 
     init(page: Binding<Page>) { _page = page }
@@ -286,7 +287,7 @@ struct SettingsView: View {
                     }
                     .frame(width: (geometry.size.width - 16) * 0.48)
                     overviewTile(t("常用操作", "Quick actions")) {
-                        overviewButton(t("新建快速笔记", "New quick note")) { NotebookWindowController.shared.show(intent: "quick") }
+                        overviewButton(t("打开快速笔记", "Open quick notes")) { NotebookWindowController.shared.show(intent: "quick") }
                         overviewButton(t("打开笔记本", "Open notebook")) { NotebookWindowController.shared.show() }
                         overviewButton(t("打开录写与翻译", "Open transcription and translation")) { TranslationWindowController.shared.show() }
                     }
@@ -325,14 +326,6 @@ struct SettingsView: View {
 
     private var audioPage: some View {
         VStack(alignment: .leading, spacing: 12) {
-            card {
-                settingToggle(
-                    t("启用音频功能", "Enable audio features"),
-                    t("关闭后停止设备枚举、音量监听、设备锁定与配置组快捷键", "Turn off device discovery, volume monitoring, device locks, and profile hotkeys"),
-                    audio.isEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                    Binding(get: { audio.isEnabled }, set: audio.setEnabled)
-                )
-            }
             if audio.isEnabled {
                 card {
                     HStack(alignment: .top, spacing: 20) {
@@ -395,6 +388,14 @@ struct SettingsView: View {
                     Text(t("不会访问 Core Audio，也不会运行设备枚举、音量记忆、锁定恢复或配置组快捷键。", "Core Audio is not accessed; discovery, volume memory, lock recovery, and profile hotkeys are stopped."))
                         .foregroundStyle(.secondary)
                 }
+            }
+            card {
+                settingToggle(
+                    t("启用音频功能", "Enable audio features"),
+                    t("关闭后停止设备枚举、音量监听、设备锁定与配置组快捷键", "Turn off device discovery, volume monitoring, device locks, and profile hotkeys"),
+                    audio.isEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                    Binding(get: { audio.isEnabled }, set: audio.setEnabled)
+                )
             }
         }
     }
@@ -490,67 +491,60 @@ struct SettingsView: View {
 
     private var screenshotPage: some View {
         VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 16) {
-                card {
-                    Label(t("截图工作台", "Capture workspace"), systemImage: "camera.viewfinder")
-                        .font(.system(size: 18, weight: .semibold)).foregroundStyle(accent)
-                    Text(t("在任意显示器上选择区域，并立即进入统一标注工具栏。", "Select a region on any display and open the unified annotation toolbar."))
-                        .foregroundStyle(.secondary)
-                    Button { ScreenshotManager.shared.startCapture() } label: {
-                        Label(t("立即截图", "Capture now"), systemImage: "camera.viewfinder")
-                    }
+            HStack {
+                Picker(t("设置项目", "Settings"), selection: $recordingSettings) {
+                    Text(t("截图标注", "Annotations")).tag(false)
+                    Text(t("录屏文件", "Recording files")).tag(true)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 280)
+                Spacer()
+                Button(t("开始框选截图", "Select region to capture")) { ScreenshotManager.shared.startCapture() }
                     .buttonStyle(WaccPrimaryButtonStyle(accent: accent))
-                    .padding(.top, 7)
-                }
-                card {
-                    Text(t("完整能力", "Everything included")).font(.headline)
-                    Text(t("多显示器 · 智能窗口选择 · 八向缩放\n画笔 · 矩形 · 箭头 · 文字 · 马赛克\n颜色 · 精确尺寸 · 撤销 · 保存 · 剪贴板", "Multi-display · smart window selection · 8-way resize\nPen · rectangle · arrow · text · mosaic\nColors · exact size · undo · save · clipboard"))
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(5)
-                }
             }
-            card {
-                HStack(alignment: .center, spacing: 34) {
-                    VStack(alignment: .leading, spacing: 13) {
-                        Text(t("默认标注配置", "Default annotation settings"))
-                            .font(.system(size: 16, weight: .semibold))
-                        Text(t("截图开始时自动使用这些值；文字粗细只在这里设置。", "New captures start with these values; text weight is configured only here."))
-                            .foregroundStyle(.secondary)
+            if recordingSettings { regionRecordingCard } else { annotationSettings }
+        }
+    }
 
-                        HStack(spacing: 10) {
-                            Text(t("默认颜色", "Default color")).frame(width: 110, alignment: .leading)
-                            ForEach(screenshotColorChoices) { choice in
-                                Button { settings.setScreenshotAnnotationColor(choice.hex) } label: {
-                                    Circle()
-                                        .fill(choice.color)
-                                        .overlay(Circle().stroke(line, lineWidth: 1))
-                                        .frame(width: 20, height: 20)
-                                        .padding(5)
-                                        .background(surface, in: RoundedRectangle(cornerRadius: 8))
-                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.screenshotAnnotationColor == choice.hex ? accent : line, lineWidth: settings.screenshotAnnotationColor == choice.hex ? 3 : 1))
-                                }
-                                .buttonStyle(DeskPlainButtonStyle())
+    private var annotationSettings: some View {
+        card {
+            HStack(alignment: .center, spacing: 34) {
+                VStack(alignment: .leading, spacing: 13) {
+                    Text(t("默认标注配置", "Default annotation settings"))
+                        .font(.system(size: 16, weight: .semibold))
+                    Text(t("截图开始时自动使用这些值；文字粗细只在这里设置。", "New captures start with these values; text weight is configured only here."))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        Text(t("默认颜色", "Default color")).frame(width: 110, alignment: .leading)
+                        ForEach(screenshotColorChoices) { choice in
+                            Button { settings.setScreenshotAnnotationColor(choice.hex) } label: {
+                                Circle()
+                                    .fill(choice.color)
+                                    .overlay(Circle().stroke(line, lineWidth: 1))
+                                    .frame(width: 20, height: 20)
+                                    .padding(5)
+                                    .background(surface, in: RoundedRectangle(cornerRadius: 8))
+                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.screenshotAnnotationColor == choice.hex ? accent : line, lineWidth: settings.screenshotAnnotationColor == choice.hex ? 3 : 1))
                             }
-                        }
-                        screenshotDefaultPicker(t("线条粗细", "Stroke width"), selection: Binding(get: { settings.screenshotStrokeWidth }, set: settings.setScreenshotStrokeWidth), values: [1, 2, 3, 5, 8, 12])
-                        screenshotDefaultPicker(t("文字大小", "Text size"), selection: Binding(get: { settings.screenshotFontSize }, set: settings.setScreenshotFontSize), values: [14, 18, 24, 32, 44, 60])
-                        HStack {
-                            Text(t("文字粗细", "Text weight")).frame(width: 110, alignment: .leading)
-                            Picker("", selection: Binding(get: { settings.screenshotFontWeight }, set: settings.setScreenshotFontWeight)) {
-                                Text(t("常规", "Regular")).tag("Regular")
-                                Text(t("中等", "Medium")).tag("Medium")
-                                Text(t("半粗", "Semibold")).tag("SemiBold")
-                                Text(t("粗体", "Bold")).tag("Bold")
-                            }
-                            .frame(width: 190)
+                            .buttonStyle(DeskPlainButtonStyle())
                         }
                     }
-                    Spacer()
-                    screenshotDefaultsPreview
-                        .frame(width: 310)
+                    screenshotDefaultPicker(t("线条粗细", "Stroke width"), selection: Binding(get: { settings.screenshotStrokeWidth }, set: settings.setScreenshotStrokeWidth), values: [1, 2, 3, 5, 8, 12])
+                    screenshotDefaultPicker(t("文字大小", "Text size"), selection: Binding(get: { settings.screenshotFontSize }, set: settings.setScreenshotFontSize), values: [14, 18, 24, 32, 44, 60])
+                    HStack {
+                        Text(t("文字粗细", "Text weight")).frame(width: 110, alignment: .leading)
+                        Picker("", selection: Binding(get: { settings.screenshotFontWeight }, set: settings.setScreenshotFontWeight)) {
+                            Text(t("常规", "Regular")).tag("Regular")
+                            Text(t("中等", "Medium")).tag("Medium")
+                            Text(t("半粗", "Semibold")).tag("SemiBold")
+                            Text(t("粗体", "Bold")).tag("Bold")
+                        }
+                        .frame(width: 190)
+                    }
                 }
+                Spacer()
+                screenshotDefaultsPreview
+                    .frame(width: 310)
             }
-            regionRecordingCard
         }
     }
 
@@ -672,9 +666,10 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Divider()
-                    Text(t("分辨率快捷键", "Resolution hotkeys")).font(.callout.weight(.semibold))
-                    ForEach(display.modes) { mode in
-                        shortcutRow(title: mode.label(relativeTo: display.nativeResolution), subtitle: t("直接切换此模式", "Switch directly to this mode"), shortcut: displayShortcutBinding(display: display, mode: mode))
+                    DisclosureGroup(t("分辨率快捷键", "Resolution hotkeys")) {
+                        ForEach(display.modes) { mode in
+                            shortcutRow(title: mode.label(relativeTo: display.nativeResolution), subtitle: t("直接切换此模式", "Switch directly to this mode"), shortcut: displayShortcutBinding(display: display, mode: mode))
+                        }
                     }
                 }
             }
@@ -682,7 +677,7 @@ struct SettingsView: View {
     }
 
     private var mousePage: some View {
-        VStack(spacing: 16) {
+        HStack(alignment: .top, spacing: 10) {
             card {
                 Label(t("鼠标滚轮方向", "Mouse wheel direction"), systemImage: "computermouse").font(.headline)
                 Picker("", selection: Binding(
@@ -691,7 +686,7 @@ struct SettingsView: View {
                 )) {
                     ForEach(MouseScrollBehavior.allCases) { behavior in Text(behavior.title).tag(behavior) }
                 }
-                .pickerStyle(.radioGroup)
+                .pickerStyle(.segmented)
                 Text(t("只修改外接鼠标滚轮；触控板继续使用 macOS 原始设置。", "Only changes external mouse scrolling; the trackpad keeps the macOS setting."))
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
@@ -714,24 +709,29 @@ struct SettingsView: View {
     }
 
     private var hotkeysPage: some View {
-        card {
-            shortcutRow(title: t("开始截图", "Start capture"), subtitle: t("跨显示器截图与标注", "Cross-display capture and annotation"), shortcut: Binding(get: { settings.screenshotShortcut }, set: settings.setScreenshotShortcut))
-            Divider()
-            shortcutRow(title: t("打开上次笔记页面", "Open last notebook page"), subtitle: t("恢复上次打开的笔记", "Restore the last opened note"), shortcut: Binding(get: { settings.notebookLastShortcut }, set: settings.setNotebookLastShortcut))
-            Divider()
-            shortcutRow(title: t("打开录写/翻译", "Open Transcribe / Translate"), subtitle: t("显示录写/翻译窗口", "Show the transcription and translation window"), shortcut: Binding(get: { settings.translationShortcut }, set: settings.setTranslationShortcut))
-            Divider()
-            shortcutRow(title: t("打开快速笔记", "Open Quick Notes"), subtitle: t("在固定笔记本中随手记录", "Write in the fixed Quick Notes notebook"), shortcut: Binding(get: { settings.notebookQuickShortcut }, set: settings.setNotebookQuickShortcut))
-            if audio.isEnabled {
+        VStack(alignment: .leading, spacing: 10) {
+            card {
+                Text(t("打开工具", "Open a tool")).font(.headline)
+                shortcutRow(title: t("开始截图", "Start capture"), subtitle: t("跨显示器截图与标注", "Cross-display capture and annotation"), shortcut: Binding(get: { settings.screenshotShortcut }, set: settings.setScreenshotShortcut))
                 Divider()
-                shortcutRow(title: t("下一个音频配置组", "Next audio profile"), subtitle: t("整体切换输出和输入设备", "Switch the output and input pair together"), shortcut: Binding(get: { settings.nextAudioProfileShortcut }, set: settings.setNextAudioProfileShortcut))
+                shortcutRow(title: t("打开上次笔记页面", "Open last notebook page"), subtitle: t("恢复上次打开的笔记", "Restore the last opened note"), shortcut: Binding(get: { settings.notebookLastShortcut }, set: settings.setNotebookLastShortcut))
                 Divider()
-                shortcutRow(title: t("上一个音频配置组", "Previous audio profile"), subtitle: t("按相反方向切换配置组", "Cycle through profiles in reverse"), shortcut: Binding(get: { settings.previousAudioProfileShortcut }, set: settings.setPreviousAudioProfileShortcut))
-            } else {
+                shortcutRow(title: t("打开录写/翻译", "Open Transcribe / Translate"), subtitle: t("显示录写/翻译窗口", "Show the transcription and translation window"), shortcut: Binding(get: { settings.translationShortcut }, set: settings.setTranslationShortcut))
                 Divider()
-                Label(t("音频功能关闭时不注册配置组快捷键", "Profile hotkeys are not registered while audio is off"), systemImage: "speaker.slash.fill")
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 7)
+                shortcutRow(title: t("打开快速笔记", "Open Quick Notes"), subtitle: t("在固定笔记本中随手记录", "Write in the fixed Quick Notes notebook"), shortcut: Binding(get: { settings.notebookQuickShortcut }, set: settings.setNotebookQuickShortcut))
+            }
+            card {
+                Text(t("切换设备", "Switch devices")).font(.headline)
+                if audio.isEnabled {
+                    shortcutRow(title: t("下一个音频配置组", "Next audio profile"), subtitle: t("整体切换输出和输入设备", "Switch the output and input pair together"), shortcut: Binding(get: { settings.nextAudioProfileShortcut }, set: settings.setNextAudioProfileShortcut))
+                    Divider()
+                    shortcutRow(title: t("上一个音频配置组", "Previous audio profile"), subtitle: t("按相反方向切换配置组", "Cycle through profiles in reverse"), shortcut: Binding(get: { settings.previousAudioProfileShortcut }, set: settings.setPreviousAudioProfileShortcut))
+                } else {
+                    Divider()
+                    Label(t("音频功能关闭时不注册配置组快捷键", "Profile hotkeys are not registered while audio is off"), systemImage: "speaker.slash.fill")
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 7)
+                }
             }
             if let error = settings.shortcutError {
                 Label(error, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.red)
@@ -740,31 +740,36 @@ struct SettingsView: View {
     }
 
     private var generalPage: some View {
-        card {
-            settingToggle(t("启用音频功能", "Enable audio features"), t("关闭后完全停止音频设备访问与相关快捷键", "Completely stop audio device access and related hotkeys"), audio.isEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill", Binding(get: { audio.isEnabled }, set: audio.setEnabled))
-            Divider()
-            settingToggle(t("登录时启动 DeskMosaic", "Launch DeskMosaic at sign-in"), t("登录后自动在菜单栏运行", "Run automatically in the menu bar after sign-in"), "power", Binding(get: { settings.launchesAtLogin }, set: settings.setLaunchAtLogin))
-            Divider()
-            settingToggle(t("启动时保持后台运行", "Start silently in the menu bar"), t("不自动打开设置窗口", "Do not open the settings window automatically"), "menubar.rectangle", Binding(get: { settings.silentStart }, set: settings.setSilentStart))
-            Divider()
-            HStack {
-                Label(t("主题", "Theme"), systemImage: "circle.lefthalf.filled")
-                Spacer()
-                Picker("", selection: Binding(get: { settings.theme }, set: settings.setTheme)) {
-                    Text(t("浅色", "Light")).tag("Light")
-                    Text(t("深色", "Dark")).tag("Dark")
-                }.frame(width: 150)
+        HStack(alignment: .top, spacing: 10) {
+            card {
+                Text(t("后台运行", "Background operation")).font(.headline)
+                settingToggle(t("启用音频功能", "Enable audio features"), t("关闭后完全停止音频设备访问与相关快捷键", "Completely stop audio device access and related hotkeys"), audio.isEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill", Binding(get: { audio.isEnabled }, set: audio.setEnabled))
+                Divider()
+                settingToggle(t("登录时启动 DeskMosaic", "Launch DeskMosaic at sign-in"), t("登录后自动在菜单栏运行", "Run automatically in the menu bar after sign-in"), "power", Binding(get: { settings.launchesAtLogin }, set: settings.setLaunchAtLogin))
+                Divider()
+                settingToggle(t("启动时保持后台运行", "Start silently in the menu bar"), t("不自动打开设置窗口", "Do not open the settings window automatically"), "menubar.rectangle", Binding(get: { settings.silentStart }, set: settings.setSilentStart))
+                if let error = settings.loginItemError { Text(error).font(.callout).foregroundStyle(.red) }
             }
-            Divider()
-            HStack {
-                Label(t("语言", "Language"), systemImage: "globe")
-                Spacer()
-                Picker("", selection: Binding(get: { settings.language }, set: settings.setLanguage)) {
-                    Text("中文").tag("zh-CN")
-                    Text("English").tag("en-US")
-                }.frame(width: 150)
+            card {
+                Text(t("界面外观", "Appearance")).font(.headline)
+                HStack {
+                    Label(t("主题", "Theme"), systemImage: "circle.lefthalf.filled")
+                    Spacer()
+                    Picker("", selection: Binding(get: { settings.theme }, set: settings.setTheme)) {
+                        Text(t("浅色", "Light")).tag("Light")
+                        Text(t("深色", "Dark")).tag("Dark")
+                    }.frame(width: 150)
+                }
+                Divider()
+                HStack {
+                    Label(t("语言", "Language"), systemImage: "globe")
+                    Spacer()
+                    Picker("", selection: Binding(get: { settings.language }, set: settings.setLanguage)) {
+                        Text("中文").tag("zh-CN")
+                        Text("English").tag("en-US")
+                    }.frame(width: 150)
+                }
             }
-            if let error = settings.loginItemError { Text(error).font(.callout).foregroundStyle(.red) }
         }
     }
 
@@ -776,7 +781,7 @@ struct SettingsView: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Toggle("", isOn: value).labelsHidden().toggleStyle(.switch)
+            Toggle("", isOn: value).labelsHidden().toggleStyle(.switch).accessibilityLabel(title)
         }
         .padding(.vertical, 4)
     }

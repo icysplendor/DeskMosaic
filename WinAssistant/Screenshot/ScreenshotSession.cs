@@ -66,6 +66,10 @@ internal sealed class ScreenshotSession : IDisposable
         Color.FromRgb(255, 140, 0)
     ];
 
+    private readonly bool englishToolbar = ConfigurationStore.Shared.Configuration.Audio.Language == "en-US";
+    private int feedbackButton = -1;
+    private long feedbackStart;
+    private int feedbackGeneration;
     private Rect? selection;
     private Rect? hoverCandidate;
     private ScreenshotTool? activeTool;
@@ -207,7 +211,7 @@ internal sealed class ScreenshotSession : IDisposable
         var localSelection = surface.GlobalToLocal(effectiveSelection.Value);
         drawingContext.DrawRectangle(
             null,
-            new Pen(SystemColors.HighlightBrush, selection is null ? 2 : 1.5),
+            new Pen(Brushes.SlateGray, selection is null ? 2 : 1.5),
             localSelection);
 
         if (selection is null) return;
@@ -583,7 +587,7 @@ internal sealed class ScreenshotSession : IDisposable
     private void DrawInstruction(OverlaySurface surface, DrawingContext drawingContext)
     {
         var text = CreateText(
-            "移动鼠标选择窗口，或拖动选择任意区域",
+            englishToolbar ? "Click a window or drag to select an area   ·   Esc to cancel" : "单击窗口或拖动框选区域　·　Esc 取消",
             15,
             Brushes.White,
             FontWeights.Medium,
@@ -885,7 +889,7 @@ internal sealed class ScreenshotSession : IDisposable
 
         var toolbar = surface.GlobalToLocal(ToolbarRect());
         drawingContext.DrawRoundedRectangle(
-            new SolidColorBrush(Color.FromArgb(248, 245, 245, 245)),
+            new SolidColorBrush(Color.FromRgb(240, 241, 246)),
             new Pen(Brushes.Gray, 0.7),
             toolbar,
             8,
@@ -895,12 +899,19 @@ internal sealed class ScreenshotSession : IDisposable
         {
             var globalButton = ToolbarButtonRect(index);
             var button = surface.GlobalToLocal(globalButton);
+            var inset = new Rect(button.X + 2, button.Y + 4, Math.Max(0, button.Width - 4), button.Height - 8);
+            if (index == CompactPaletteButtonIndex || index == SizeButtonIndex || index == SaveButtonIndex)
+                drawingContext.DrawLine(new Pen(Brushes.LightSlateGray, 0.7), new Point(button.Left, button.Top + 10), new Point(button.Left, button.Bottom - 10));
+            if (index == FinishButtonIndex && recording is null)
+                drawingContext.DrawRoundedRectangle(new SolidColorBrush(Color.FromRgb(253, 244, 165)), null, inset, 5, 5);
+            if (index == RecordButtonIndex && recording is not null)
+                drawingContext.DrawRoundedRectangle(Brushes.Maroon, null, inset, 5, 5);
             if (index < ToolButtonCount && activeTool == (ScreenshotTool)index
                 || index == SizeButtonIndex && sizeInputStage is not null
                 || recording is not null && index == DesktopButtonIndex && activeTool is null)
             {
                 drawingContext.DrawRoundedRectangle(
-                    new SolidColorBrush(Color.FromArgb(46, 0, 120, 215)),
+                    new SolidColorBrush(Color.FromRgb(194, 202, 221)),
                     null,
                     new Rect(
                         button.X + 2,
@@ -911,6 +922,11 @@ internal sealed class ScreenshotSession : IDisposable
                     5);
             }
 
+            if (feedbackButton == index)
+            {
+                var remaining = Math.Clamp(1 - (Environment.TickCount64 - feedbackStart) / 130.0, 0, 1);
+                drawingContext.DrawRoundedRectangle(new SolidColorBrush(Color.FromArgb((byte)(72 * remaining), 82, 92, 118)), null, inset, 5, 5);
+            }
             if (index == CompactPaletteButtonIndex)
             {
                 DrawCompactPalette(surface, drawingContext, button);
@@ -922,26 +938,9 @@ internal sealed class ScreenshotSession : IDisposable
                 continue;
             }
 
-            var title = index switch
-            {
-                0 => "矩形",
-                1 => "箭头",
-                2 => "画笔",
-                3 => "文字↕",
-                4 => "马赛克↕",
-                SizeButtonIndex => "像素",
-                UndoButtonIndex => "撤销",
-                SaveButtonIndex => "保存",
-                CaptureRecordButtonIndex => recording is null ? "录屏" : "完成",
-                DesktopButtonIndex => recording is null ? "完成" : "操作",
-                RecordingStopButtonIndex => "停止",
-                _ => ""
-            };
+            var title = ToolbarTitle(index);
             var brush = recording is not null && index is SizeButtonIndex or SaveButtonIndex
-                ? SystemColors.GrayTextBrush
-                : index == RecordButtonIndex ? Brushes.IndianRed : index == FinishButtonIndex
-                ? SystemColors.HighlightBrush
-                : Brushes.Black;
+                ? Brushes.DimGray : recording is not null && index == RecordButtonIndex ? Brushes.White : Brushes.Black;
             DrawCenteredText(surface, drawingContext, title, button, brush);
         }
 
@@ -1142,7 +1141,7 @@ internal sealed class ScreenshotSession : IDisposable
             if (pickerSelectionIndex == row)
             {
                 drawingContext.DrawRoundedRectangle(
-                    new SolidColorBrush(Color.FromArgb(46, 0, 120, 215)),
+                    new SolidColorBrush(Color.FromRgb(194, 202, 221)),
                     null,
                     rect,
                     8,
@@ -1264,16 +1263,16 @@ internal sealed class ScreenshotSession : IDisposable
         if (sizeInputStage == SizeInputStage.Width)
         {
             var input = string.IsNullOrEmpty(sizeInputBuffer) ? "…" : sizeInputBuffer;
-            text = $"正在输入宽度：{input} px  按回车继续";
+            text = englishToolbar ? $"Width: {input} px · Enter for height" : $"正在输入宽度：{input} px  按回车继续";
         }
         else if (sizeInputStage == SizeInputStage.Height)
         {
             var input = string.IsNullOrEmpty(sizeInputBuffer) ? "…" : sizeInputBuffer;
-            text = $"宽度 {pendingInputWidth ?? (int)Math.Round(selected.Width)} px · 正在输入高度：{input} px  按回车应用";
+            text = englishToolbar ? $"Height: {input} px · Enter to apply" : $"宽度 {pendingInputWidth ?? (int)Math.Round(selected.Width)} px · 正在输入高度：{input} px  按回车应用";
         }
         else if (recording is { } capture)
         {
-            text = $"录像 {capture.Width} × {capture.Height}";
+            text = (englishToolbar ? "Recording " : "录像 ") + $"{capture.Width} × {capture.Height}";
         }
         else
         {
@@ -1326,6 +1325,7 @@ internal sealed class ScreenshotSession : IDisposable
         for (var index = 0; index < ToolbarButtonCount; index++)
         {
             if (!ToolbarButtonRect(index).Contains(point)) continue;
+            PulseToolbar(index);
             if (index != SizeButtonIndex) CancelSizeInput();
             if (recording is not null && index < ToolButtonCount && activeTool == (ScreenshotTool)index)
             {
@@ -1421,15 +1421,62 @@ internal sealed class ScreenshotSession : IDisposable
         }
     }
 
+    private async void PulseToolbar(int index)
+    {
+        if (!SystemParameters.ClientAreaAnimation) return;
+        var generation = ++feedbackGeneration;
+        feedbackButton = index;
+        feedbackStart = Environment.TickCount64;
+        do
+        {
+            foreach (var window in windows) window.Surface.InvalidateVisual();
+            await Task.Delay(20);
+            if (isClosed || generation != feedbackGeneration) return;
+        } while (Environment.TickCount64 - feedbackStart < 130);
+        feedbackButton = -1;
+        foreach (var window in windows) window.Surface.InvalidateVisual();
+    }
+
+    private string ToolbarTitle(int index)
+    {
+        return index switch
+        {
+            0 => englishToolbar ? "Rect" : "矩形",
+            1 => englishToolbar ? "Arrow" : "箭头",
+            2 => englishToolbar ? "Pen" : "画笔",
+            3 => englishToolbar ? "Text ▾" : "文字 ▾",
+            4 => englishToolbar ? "Mosaic ▾" : "马赛克 ▾",
+            SizeButtonIndex => englishToolbar ? "Pixels" : "像素",
+            UndoButtonIndex => englishToolbar ? "Undo" : "撤销",
+            SaveButtonIndex => englishToolbar ? "Save" : "保存",
+            CaptureRecordButtonIndex when recording is null => englishToolbar ? "Record" : "录屏",
+            DesktopButtonIndex when recording is null => englishToolbar ? "Done" : "完成",
+            CaptureRecordButtonIndex => englishToolbar ? "Finish" : "完成",
+            DesktopButtonIndex => englishToolbar ? "Interact" : "操作桌面",
+            RecordingStopButtonIndex => englishToolbar ? "Stop" : "停止",
+            _ => ""
+        };
+    }
+
+    private double ButtonWidth(int index) => index switch
+    {
+        CompactPaletteButtonIndex => 44,
+        StrokeSizeButtonIndex => 48,
+        4 or DesktopButtonIndex => 66,
+        _ => englishToolbar ? 54 : 46
+    };
+
+    private double ToolbarWidth => Enumerable.Range(0, ToolbarButtonCount).Sum(ButtonWidth);
+
     private Rect ToolbarRect()
     {
         if (selection is null) return Rect.Empty;
         var selected = selection.Value;
         var monitor = MonitorForSelection(selected);
         var scale = monitor.Scale;
-        var width = Math.Min(((ToolbarButtonCount - 3) * 38 + 58 + 44 + 48) * scale,
+        var width = Math.Min(ToolbarWidth * scale,
             monitor.Bounds.Width - 16 * scale);
-        var height = 38 * scale;
+        var height = 42 * scale;
         var x = Math.Clamp(
             selected.Right - width,
             monitor.Bounds.Left + 8 * scale,
@@ -1448,28 +1495,13 @@ internal sealed class ScreenshotSession : IDisposable
     private Rect ToolbarButtonRect(int index)
     {
         var toolbar = ToolbarRect();
-        var scale = toolbar.Width / ((ToolbarButtonCount - 3) * 38 + 58 + 44 + 48);
+        var scale = toolbar.Width / ToolbarWidth;
         var x = toolbar.X;
         for (var current = 0; current < index; current++)
         {
-            x += (current switch
-            {
-                CompactPaletteButtonIndex => 44,
-                StrokeSizeButtonIndex => 48,
-                4 => 58,
-                _ => 38
-            }) * scale;
+            x += ButtonWidth(current) * scale;
         }
-        return new Rect(
-            x,
-            toolbar.Y,
-            (index switch
-            {
-                CompactPaletteButtonIndex => 44,
-                StrokeSizeButtonIndex => 48,
-                4 => 58,
-                _ => 38
-            }) * scale,
+        return new Rect(x, toolbar.Y, ButtonWidth(index) * scale,
             toolbar.Height);
     }
 
@@ -1612,7 +1644,7 @@ internal sealed class ScreenshotSession : IDisposable
     {
         if (!int.TryParse(sizeInputBuffer, out var value) || value <= 0)
         {
-            sizeInputError = "请输入大于 0 的数字";
+            sizeInputError = englishToolbar ? "Enter a number greater than zero" : "请输入大于 0 的数字";
             System.Media.SystemSounds.Beep.Play();
             Redraw();
             return;
@@ -1621,7 +1653,7 @@ internal sealed class ScreenshotSession : IDisposable
         {
             if (value > virtualBounds.Width)
             {
-                sizeInputError = $"宽度最大 {(int)virtualBounds.Width} px";
+                sizeInputError = englishToolbar ? $"Maximum width: {(int)virtualBounds.Width} px" : $"宽度最大 {(int)virtualBounds.Width} px";
                 System.Media.SystemSounds.Beep.Play();
                 Redraw();
                 return;
@@ -1635,7 +1667,7 @@ internal sealed class ScreenshotSession : IDisposable
         }
         if (value > virtualBounds.Height)
         {
-            sizeInputError = $"高度最大 {(int)virtualBounds.Height} px";
+            sizeInputError = englishToolbar ? $"Maximum height: {(int)virtualBounds.Height} px" : $"高度最大 {(int)virtualBounds.Height} px";
             System.Media.SystemSounds.Beep.Play();
             Redraw();
             return;

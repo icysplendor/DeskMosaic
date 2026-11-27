@@ -24,10 +24,12 @@
         >语言
         <select id="language" aria-label="代码语言"></select
       ></label>
-      <button id="find" title="Ctrl/Cmd+F">查找 / 替换</button>
-      <button id="go-line" title="Ctrl/Cmd+G">跳转行</button>
-      <button id="undo" title="Ctrl/Cmd+Z">撤销</button>
-      <button id="redo" title="Ctrl/Cmd+Shift+Z">重做</button>
+      <div class="code-tool-group" role="group" aria-label="编辑">
+        <button id="find" title="Ctrl/Cmd+F">查找 / 替换</button>
+        <button id="go-line" title="Ctrl/Cmd+G">跳转行</button>
+        <button id="undo" title="Ctrl/Cmd+Z">撤销</button>
+        <button id="redo" title="Ctrl/Cmd+Shift+Z">重做</button>
+      </div>
       <label class="wrap-option"
         ><input id="wrap" type="checkbox" />自动换行</label
       >
@@ -56,6 +58,7 @@
         <span class="encoding">UTF-8 · LF</span>
       </div>
       <span id="editor-message" role="status"></span>
+
       <div class="code-actions">
         <button id="cancel">取消</button
         ><button id="save" class="primary" title="Ctrl/Cmd+S">
