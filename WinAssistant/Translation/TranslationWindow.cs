@@ -33,8 +33,8 @@ internal sealed class TranslationWindow : Window
     private Brush Muted => (Brush)Resources["CaptionMuted"];
     private Brush Line => (Brush)Resources["CaptionLine"];
     private Brush Danger => (Brush)Resources["CaptionDanger"];
-    private readonly Button start = new() { MinWidth = 56 };
-    private readonly Button twoWay = new() { Width = 64 };
+    private readonly Button start = new();
+    private readonly Button twoWay = new();
     private readonly Button clear = new() { IsEnabled = false };
     private readonly CheckBox transcribeOnly = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     private readonly CheckBox recordAudio = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -130,9 +130,16 @@ internal sealed class TranslationWindow : Window
         Resources["StartInk"] = dark ? Brushes.White : ColorBrush(ThemeManager.ButtonInk);
         start.Background = start.BorderBrush = (Brush)Resources["StartFill"];
         start.Foreground = (Brush)Resources["StartInk"];
-        twoWay.Background = (Brush)Resources["CaptionSurface"];
-        twoWay.BorderBrush = Line;
-        twoWay.Foreground = Foreground;
+        foreach (var action in new[] { start, twoWay })
+        {
+            action.Width = 82;
+            action.Height = action.MinHeight = 28;
+            action.Padding = new Thickness(2, 0, 2, 0);
+            action.FontSize = 13;
+            action.VerticalAlignment = VerticalAlignment.Center;
+        }
+        twoWay.Background = twoWay.BorderBrush = ColorBrush(dark ? "#526B91" : "#455C80");
+        twoWay.Foreground = Brushes.White;
         twoWay.Content = T("互译", "Two-way");
         ToolTipService.SetShowOnDisabled(twoWay, true);
         clear.Content = T("清屏", "Clear");
@@ -220,8 +227,6 @@ internal sealed class TranslationWindow : Window
         DockPanel.SetDock(sessionBar, Dock.Top);
         root.Children.Insert(0, sessionBar);
         actions.Children.Add(audioSource);
-        actions.Children.Add(start);
-        actions.Children.Add(twoWay);
         toolbar.Children.Add(sourceLanguage);
         toolbar.Children.Add(swapLanguages);
         toolbar.Children.Add(targetLanguage);
@@ -256,7 +261,9 @@ internal sealed class TranslationWindow : Window
         };
         Activated += (_, _) => UpdateAdvancedReview(SessionOptions());
         actions.Children.Add(advancedReview);
-        start.Margin = new Thickness(2, 0, 0, 0);
+        actions.Children.Add(start);
+        actions.Children.Add(twoWay);
+        start.Margin = new Thickness(8, 0, 0, 0);
         twoWay.Margin = new Thickness(4, 0, 0, 0);
         foreach (var picker in new[] { compute, originalSize, translationSize })
             picker.Style = (Style)Resources["CaptionPicker"];
@@ -374,9 +381,9 @@ internal sealed class TranslationWindow : Window
             : twoWayReady ? T("开始中英互译，按段落自动选择方向", "Start two-way translation and choose a direction per paragraph")
                 : T("需要中英流式识别模型和文本翻译模型", "Requires Chinese/English streaming recognition and a translation model");
         start.IsEnabled = !fileCompleted;
-        start.Content = fileCompleted ? T("音频执行完毕", "Audio processing complete")
+        start.Content = fileCompleted ? T("音频执行完毕", "Completed")
             : session is null ? T("开始", "Start")
-            : twoWaySession ? T("互译结束", "End two-way translation") : T("翻译结束", "End translation");
+            : twoWaySession ? T("互译结束", "End two-way") : T("翻译结束", "End session");
         start.Background = start.BorderBrush = session is null ? (Brush)Resources["StartFill"] : Danger;
         start.Foreground = session is null ? (Brush)Resources["StartInk"] : Brushes.White;
         swapLanguages.IsEnabled = session is null && translating && sourceLanguage.SelectedValue is string source &&

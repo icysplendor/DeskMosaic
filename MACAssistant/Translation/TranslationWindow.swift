@@ -362,9 +362,9 @@ private struct TranslationWindowView: View {
     private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
     private let stopAccent = Color(red: 0.70, green: 0.24, blue: 0.30)
     private var sessionButtonTitle: String {
-        if controller.fileCompleted { return t("音频执行完毕", "Audio processing complete") }
+        if controller.fileCompleted { return t("音频执行完毕", "Completed") }
         guard controller.running else { return t("开始", "Start") }
-        return controller.twoWaySession ? t("互译结束", "End two-way translation") : t("翻译结束", "End translation")
+        return controller.twoWaySession ? t("互译结束", "End two-way") : t("翻译结束", "End session")
     }
     private var canStartTwoWay: Bool {
         !controller.transcribeOnly && controller.sessionOptions.canTranslateTwoWay
@@ -383,14 +383,17 @@ private struct TranslationWindowView: View {
                     (.file, t("导入音频", "Import audio"))
                 ], placeholder: t("请选择", "Select"))
                 .disabled(controller.running)
-                sessionButton(sessionButtonTitle, tint: controller.running ? stopAccent : accent) { controller.toggle() }
-                    .disabled(controller.fileCompleted)
-                    .padding(.leading, 4)
-                Button(t("互译", "Two-way")) { controller.toggle(twoWay: true) }
-                    .buttonStyle(.bordered)
-                    .disabled(controller.running || controller.fileCompleted || !canStartTwoWay)
-                    .help(twoWayHelp)
                 sessionOptions
+                sessionButton(sessionButtonTitle,
+                              fill: controller.running ? stopAccent : (dark ? accent : DeskPalette.grayBlue),
+                              ink: controller.running || dark ? .white : DeskPalette.buttonInk,
+                              enabled: !controller.fileCompleted) { controller.toggle() }
+                    .padding(.leading, 4)
+                sessionButton(t("互译", "Two-way"), fill: twoWayFill, ink: .white,
+                              enabled: !controller.running && !controller.fileCompleted && canStartTwoWay) {
+                    controller.toggle(twoWay: true)
+                }
+                .help(twoWayHelp)
                 fileControl
                 sessionStatus
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -594,18 +597,24 @@ private struct TranslationWindowView: View {
         .help(help)
     }
 
-    private func sessionButton(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
+    private var twoWayFill: Color {
+        dark ? Color(red: 0.32, green: 0.42, blue: 0.57) : Color(red: 0.27, green: 0.36, blue: 0.50)
+    }
+
+    private func sessionButton(_ title: String, fill: Color, ink: Color, enabled: Bool,
+                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .fontWeight(.semibold)
-                .frame(minWidth: 54)
-                .fixedSize(horizontal: true, vertical: false)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .foregroundStyle(ink)
+                .frame(width: 82, height: 28)
+                .background(fill, in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(controller.running || dark ? tint : DeskPalette.grayBlue, in: RoundedRectangle(cornerRadius: 5))
-        .foregroundStyle(controller.running || dark ? Color.white : DeskPalette.buttonInk)
         .buttonStyle(DeskPlainButtonStyle())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
     }
 
     private var twoWayHelp: String {
