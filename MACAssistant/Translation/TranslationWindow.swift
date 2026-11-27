@@ -358,7 +358,7 @@ private struct TranslationWindowView: View {
     }
 
     private var dark: Bool { settings.theme == "Dark" }
-    private let accent = Color(red: 0.14, green: 0.42, blue: 0.996)
+    private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
     private let stopAccent = Color(red: 0.70, green: 0.24, blue: 0.30)
     private var sessionButtonTitle: String {
         if controller.fileCompleted { return t("音频执行完毕", "Audio processing complete") }
@@ -369,7 +369,7 @@ private struct TranslationWindowView: View {
         !controller.transcribeOnly && controller.sessionOptions.canTranslateTwoWay
     }
     private var line: Color {
-        dark ? Color(red: 0.20, green: 0.25, blue: 0.35) : Color(red: 0.85, green: 0.88, blue: 0.93)
+        dark ? Color(red: 0.20, green: 0.25, blue: 0.35) : Color(red: 0.85, green: 0.86, blue: 0.89)
     }
 
     var body: some View {
@@ -474,7 +474,7 @@ private struct TranslationWindowView: View {
             }
             return true
         }
-        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 0.965, green: 0.973, blue: 0.988))
+        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 240/255, green: 241/255, blue: 246/255))
         .preferredColorScheme(dark ? .dark : .light)
         .sheet(isPresented: $confirmingClear) { clearConfirmation }
         .onChange(of: controller.sessionOptions.sessionSourceLanguages) { available in
@@ -572,7 +572,7 @@ private struct TranslationWindowView: View {
                     .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(active ? accent.opacity(0.35) : line))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeskPlainButtonStyle())
             .disabled(!mossReady || controller.running || controller.audioFile != nil)
             .accessibilityLabel(label)
             .accessibilityValue(Text(active ? t("开启", "On") : t("关闭", "Off")))

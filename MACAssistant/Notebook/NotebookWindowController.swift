@@ -67,7 +67,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
     private func applyTheme(_ settings: Any) {
         let dark = (settings as? [String: Any])?["theme"] as? String == "Dark"
         window?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        window?.backgroundColor = dark ? NSColor(calibratedRed: 0.067, green: 0.106, blue: 0.169, alpha: 1) : NSColor(calibratedRed: 0.98, green: 0.988, blue: 1, alpha: 1)
+        window?.backgroundColor = dark ? NSColor(calibratedRed: 0.067, green: 0.106, blue: 0.169, alpha: 1) : NSColor(calibratedRed: 0.976, green: 0.976, blue: 0.984, alpha: 1)
     }
     private func navigate() {
         guard ready, let intent = pendingIntent else { return }

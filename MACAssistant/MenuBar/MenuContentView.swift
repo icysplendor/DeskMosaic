@@ -10,10 +10,10 @@ struct MenuContentView: View {
     @EnvironmentObject private var audio: AudioManager
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(red: 0.055, green: 0.09, blue: 0.149) : .white }
-    private var panel: Color { dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : Color(red: 0.973, green: 0.984, blue: 1) }
-    private var line: Color { dark ? Color(red: 0.2, green: 0.255, blue: 0.345) : Color(red: 0.851, green: 0.882, blue: 0.925) }
-    private let accent = Color(red: 0.141, green: 0.42, blue: 0.996)
+    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 240/255, green: 241/255, blue: 246/255) }
+    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
+    private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
+    private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -102,9 +102,9 @@ struct MenuContentView: View {
                 Text(t("音频配置组", "Audio profiles")).font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button { audio.cycleProfile(direction: -1) } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPlainButtonStyle())
                 Button { audio.cycleProfile(direction: 1) } label: { Image(systemName: "chevron.right") }
-                    .buttonStyle(.plain)
+                    .buttonStyle(DeskPlainButtonStyle())
             }
             if audio.profiles.isEmpty {
                 Text(t("请在设置中保存配置组", "Save a profile in Settings"))
@@ -147,7 +147,7 @@ struct MenuContentView: View {
             .background(active ? accent.opacity(0.13) : surface, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPlainButtonStyle())
         .disabled(outputName == nil || inputName == nil)
     }
 
@@ -232,7 +232,7 @@ struct MenuContentView: View {
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(line))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPlainButtonStyle())
     }
 
     private func performAfterDismiss(_ action: @escaping @MainActor () -> Void) {

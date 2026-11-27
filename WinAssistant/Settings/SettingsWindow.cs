@@ -14,7 +14,7 @@ using WinAssistant.Translation;
 
 namespace WinAssistant.Settings;
 
-internal sealed class SettingsWindow : Window
+internal sealed partial class SettingsWindow : Window
 {
     private enum RecordingTarget { None, Screenshot, NotebookLast, NotebookQuick, Translation, NextProfile, PreviousProfile }
 
@@ -26,16 +26,25 @@ internal sealed class SettingsWindow : Window
     private TextBlock statusText = new();
     private RecordingTarget recordingTarget;
     private readonly System.Windows.Threading.DispatcherTimer renderTimer;
-    private int selectedTabIndex;
+    private const int OverviewTab = 5;
+    private int selectedTabIndex = OverviewTab;
+    private ScrollViewer? pageScroller;
+    private int renderedTab;
+    private readonly Action quickNote;
+    private readonly Action openNotebook;
+    private readonly Action openTranslation;
 
     internal SettingsWindow(
         GlobalHotKeyManager hotKeyManager,
         Action captureAction,
         AppStateService? audioState,
-        Action reloadAllHotKeys)
+        Action reloadAllHotKeys, Action quickNote, Action openNotebook, Action openTranslation)
     {
         this.hotKeyManager = hotKeyManager;
         this.captureAction = captureAction;
+        this.quickNote = quickNote;
+        this.openNotebook = openNotebook;
+        this.openTranslation = openTranslation;
         this.audioState = audioState;
         this.reloadAllHotKeys = reloadAllHotKeys;
         renderTimer = new System.Windows.Threading.DispatcherTimer
@@ -44,6 +53,7 @@ internal sealed class SettingsWindow : Window
         };
         renderTimer.Tick += (_, _) =>
         {
+            if (IsMouseCaptureWithin) return;
             renderTimer.Stop();
             Render();
         };
@@ -95,20 +105,19 @@ internal sealed class SettingsWindow : Window
         Title = T("辅助工具控制中心", "Assistant Control Center");
         var dark = audioState?.Snapshot.Theme == "Dark";
         ThemeManager.ApplyWindowFrame(this, audioState?.Snapshot.Theme);
-        var appBrush = Brush(dark ? "#0B1422" : "#F2F7FE");
-        var surfaceBrush = Brush(dark ? "#111B2B" : "#FFFFFF");
-        var lineBrush = Brush(dark ? "#334158" : "#D9E1EC");
+        var appBrush = Brush(dark ? "#0B1422" : "#F0F1F6");
+        var lineBrush = Brush(dark ? "#444754" : "#DADCE3");
         Background = appBrush;
         Foreground = Brush(dark ? "#F7F9FC" : "#161B28");
         FontSize = 13;
         Resources[typeof(Button)] = BuildButtonStyle(dark);
         var sliderStyle = new Style(typeof(Slider));
-        sliderStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brush("#246BFE")));
+        sliderStyle.Setters.Add(new Setter(Control.ForegroundProperty, Brush("#4C5872")));
         Resources[typeof(Slider)] = sliderStyle;
 
         var root = new Border
         {
-            Background = surfaceBrush,
+            Background = appBrush,
             BorderBrush = lineBrush,
             BorderThickness = new Thickness(1)
         };
@@ -119,51 +128,54 @@ internal sealed class SettingsWindow : Window
 
         var content = new Grid { Margin = new Thickness(18) };
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition());
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 14) };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal };
-        DockPanel.SetDock(actions, Dock.Right);
-        var language = new Button { Content = IsEnglish ? "中文" : "English", Margin = new Thickness(0, 0, 8, 0) };
-        language.Click += (_, _) => audioState?.SetLanguage(IsEnglish ? "zh-CN" : "en-US");
-        actions.Children.Add(language);
-        if (selectedTabIndex == 0)
+        if (selectedTabIndex != OverviewTab)
         {
-            var refresh = new Button { Content = T("刷新", "Refresh"), Background = Brush("#246BFE"), BorderBrush = Brush("#246BFE"), Foreground = Brushes.White };
-            refresh.Click += (_, _) => audioState?.Refresh();
-            actions.Children.Add(refresh);
+            var header = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 0, 0, 14) };
+            var actions = new StackPanel { Orientation = Orientation.Horizontal };
+            DockPanel.SetDock(actions, Dock.Right);
+            var language = new Button { Content = IsEnglish ? "中文" : "English", Margin = new Thickness(0, 0, 8, 0) };
+            language.Click += (_, _) => audioState?.SetLanguage(IsEnglish ? "zh-CN" : "en-US");
+            actions.Children.Add(language);
+            if (selectedTabIndex == 0)
+            {
+                var refresh = new Button { Content = T("刷新", "Refresh"), Background = Brush("#4C5872"), BorderBrush = Brush("#4C5872"), Foreground = Brushes.White };
+                refresh.Click += (_, _) => audioState?.Refresh();
+                actions.Children.Add(refresh);
+            }
+            header.Children.Add(actions);
+            var headerLabels = new StackPanel();
+            headerLabels.Children.Add(new TextBlock { Text = selectedTabIndex == 0 ? T("音频控制中心", "Audio Control Center") : PageName(selectedTabIndex), FontSize = 26, FontWeight = FontWeights.SemiBold });
+            headerLabels.Children.Add(new TextBlock { Text = PageSubtitle(selectedTabIndex), Foreground = Muted(dark), Margin = new Thickness(0, 4, 0, 0) });
+            header.Children.Add(headerLabels);
+            content.Children.Add(header);
         }
-        header.Children.Add(actions);
-        var headerLabels = new StackPanel();
-        headerLabels.Children.Add(new TextBlock { Text = selectedTabIndex == 0 ? T("音频控制中心", "Audio Control Center") : PageName(selectedTabIndex), FontSize = 26, FontWeight = FontWeights.SemiBold });
-        headerLabels.Children.Add(new TextBlock { Text = PageSubtitle(selectedTabIndex), Foreground = Muted(dark), Margin = new Thickness(0, 4, 0, 0) });
-        header.Children.Add(headerLabels);
-        content.Children.Add(header);
 
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 16) };
-        var tabNames = new[] { T("音频中心", "Audio"), T("截图", "Screenshot"), T("快捷键", "Hotkeys"), T("通用", "General"), T("录写/翻译", "Transcribe / Translate") };
-        for (var index = 0; index < tabNames.Length; index++)
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
+        foreach (var index in new[] { OverviewTab, 0, 1, 4, 2, 3 })
         {
             var target = index;
             var selected = selectedTabIndex == index;
             var tab = new Button
             {
-                Content = tabNames[index],
-                MinWidth = 100,
+                Content = index == 0 ? T("音频", "Audio") : PageName(index),
+                MinWidth = 72,
                 Margin = new Thickness(0, 0, 8, 0),
-                Background = selected ? Brush("#246BFE") : Brush(dark ? "#152033" : "#F8FBFF"),
-                BorderBrush = selected ? Brush("#246BFE") : lineBrush,
+                Background = selected ? Brush("#333846") : Brushes.Transparent,
+                BorderBrush = selected ? Brush("#333846") : Brushes.Transparent,
                 Foreground = selected ? Brushes.White : Foreground
             };
             tab.Click += (_, _) => { selectedTabIndex = target; Render(); };
             tabs.Children.Add(tab);
         }
-        Grid.SetRow(tabs, 1);
+        Grid.SetRow(tabs, 2);
         content.Children.Add(tabs);
 
         UIElement page = selectedTabIndex switch
         {
+            OverviewTab => BuildOverview(dark),
             1 => BuildScreenshotPage(dark),
             2 => BuildShortcutPage(dark),
             3 => BuildGeneralPage(dark),
@@ -175,9 +187,13 @@ internal sealed class SettingsWindow : Window
             Content = page,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Background = surfaceBrush
+            Background = appBrush
         };
-        Grid.SetRow(scroller, 2);
+        if (pageScroller is not null && renderedTab == selectedTabIndex)
+            scroller.ScrollToVerticalOffset(pageScroller.VerticalOffset);
+        pageScroller = scroller;
+        renderedTab = selectedTabIndex;
+        Grid.SetRow(scroller, 1);
         content.Children.Add(scroller);
         Grid.SetRow(content, 1);
         shell.Children.Add(content);
@@ -190,7 +206,7 @@ internal sealed class SettingsWindow : Window
         var bar = new Grid
         {
             Height = 52,
-            Background = Brush(dark ? "#0E1724" : "#FAFCFF")
+            Background = Brush(dark ? "#1B1D25" : "#FAFAFC")
         };
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         bar.ColumnDefinitions.Add(new ColumnDefinition());
@@ -229,7 +245,7 @@ internal sealed class SettingsWindow : Window
         {
             Width = 1,
             Height = 20,
-            Background = Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = Brush(dark ? "#444754" : "#DADCE3"),
             Margin = new Thickness(16, 0, 0, 0)
         });
         dragArea.Child = identity;
@@ -281,7 +297,7 @@ internal sealed class SettingsWindow : Window
         var divider = new Border
         {
             Height = 1,
-            Background = Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = Brush(dark ? "#444754" : "#DADCE3"),
             VerticalAlignment = VerticalAlignment.Bottom,
             IsHitTestVisible = false
         };
@@ -299,7 +315,7 @@ internal sealed class SettingsWindow : Window
             Height = 24,
             CornerRadius = new CornerRadius(6),
             Background = dark ? Brushes.Transparent : Brush("#E9F0FA"),
-            Child = new TextBlock { Text = "☀", FontSize = 13, Foreground = dark ? Muted(true) : Brush("#246BFE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+            Child = new TextBlock { Text = "☀", FontSize = 13, Foreground = dark ? Muted(true) : Brush("#4C5872"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
         });
         choices.Children.Add(new Border
         {
@@ -315,8 +331,8 @@ internal sealed class SettingsWindow : Window
             ToolTip = dark ? T("切换到浅色模式", "Switch to light mode") : T("切换到深色模式", "Switch to dark mode"),
             Margin = new Thickness(0, 9, 10, 9),
             Padding = new Thickness(3),
-            Background = Brush(dark ? "#111B2B" : "#FFFFFF"),
-            BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = Brush(dark ? "#20222C" : "#FFFFFF"),
+            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             Focusable = false
         };
@@ -363,6 +379,7 @@ internal sealed class SettingsWindow : Window
 
     private string PageName(int index) => index switch
     {
+        OverviewTab => T("总览", "Overview"),
         1 => T("截图", "Screenshot"),
         2 => T("快捷键", "Hotkeys"),
         3 => T("通用", "General"),
@@ -420,8 +437,8 @@ internal sealed class SettingsWindow : Window
         var add = new Button
         {
             Content = T("＋ 新建组合", "+ New profile"),
-            Background = Brush("#246BFE"),
-            BorderBrush = Brush("#246BFE"),
+            Background = Brush("#4C5872"),
+            BorderBrush = Brush("#4C5872"),
             Foreground = Brushes.White,
             IsEnabled = snapshot.CurrentOutput is not null && snapshot.CurrentInput is not null
         };
@@ -503,7 +520,7 @@ internal sealed class SettingsWindow : Window
             SelectedValuePath = nameof(AudioDeviceInfo.Id),
             SelectedValue = savedOutput?.Id ?? profile.OutputDeviceId,
             ToolTip = outputOnline ? T("输出设备", "Output device") : T("原输出设备未连接", "Saved output is offline"),
-            Background = Brush(dark ? "#152033" : "#FFFFFF"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF"),
             Foreground = Foreground,
             BorderBrush = Brush(dark ? "#46546A" : "#AEB8C8"),
             Height = 42,
@@ -527,7 +544,7 @@ internal sealed class SettingsWindow : Window
             SelectedValuePath = nameof(AudioDeviceInfo.Id),
             SelectedValue = savedInput?.Id ?? profile.InputDeviceId,
             ToolTip = inputOnline ? T("输入设备", "Input device") : T("原输入设备未连接", "Saved input is offline"),
-            Background = Brush(dark ? "#152033" : "#FFFFFF"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF"),
             Foreground = Foreground,
             BorderBrush = Brush(dark ? "#46546A" : "#AEB8C8"),
             Height = 42,
@@ -551,7 +568,7 @@ internal sealed class SettingsWindow : Window
         {
             Content = active ? T("使用中", "Active") : T("应用", "Apply"),
             IsEnabled = !active && outputOnline && inputOnline,
-            Background = active ? Brush("#246BFE") : Background,
+            Background = active ? Brush("#4C5872") : Background,
             Foreground = active ? Brushes.White : Foreground,
             Width = 64,
             Height = 42,
@@ -577,8 +594,8 @@ internal sealed class SettingsWindow : Window
         return new Border
         {
             Child = row,
-            Background = active ? Brush(dark ? "#243A67" : "#22246BFE") : Brush(dark ? "#111B2B" : "#F8FBFF"),
-            BorderBrush = active ? Brush("#246BFE") : Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : "#FFFFFF"),
+            BorderBrush = active ? Brush("#4C5872") : Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 0, 10, 0),
@@ -611,7 +628,7 @@ internal sealed class SettingsWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.Children.Add(CompactCurrentDevice(AudioDeviceKind.Output, snapshot.CurrentOutput, snapshot.LockOutput, dark));
-        var divider = new Border { Background = Brush(dark ? "#334158" : "#D9E1EC"), Margin = new Thickness(20, 0, 20, 0) };
+        var divider = new Border { Background = Brush(dark ? "#444754" : "#DADCE3"), Margin = new Thickness(20, 0, 20, 0) };
         Grid.SetColumn(divider, 1);
         grid.Children.Add(divider);
         var input = CompactCurrentDevice(AudioDeviceKind.Input, snapshot.CurrentInput, snapshot.LockInput, dark);
@@ -677,6 +694,10 @@ internal sealed class SettingsWindow : Window
         }
         foreach (var device in devices) panel.Children.Add(BuildWaccDeviceRow(device, dark));
         var scroller = new ScrollViewer { Content = panel, MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        if (pageScroller is not null && renderedTab == selectedTabIndex)
+            scroller.ScrollToVerticalOffset(pageScroller.VerticalOffset);
+        pageScroller = scroller;
+        renderedTab = selectedTabIndex;
         Grid.SetRow(scroller, 1);
         grid.Children.Add(scroller);
         return WaccCard(grid, dark);
@@ -686,8 +707,8 @@ internal sealed class SettingsWindow : Window
     {
         var border = new Border
         {
-            Background = device.IsDefault ? Brush(dark ? "#243A67" : "#22246BFE") : Brush(dark ? "#111B2B" : "#FFFFFF"),
-            BorderBrush = device.IsDefault ? Brush("#246BFE") : Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = device.IsDefault ? Brush(dark ? "#414758" : "#55C2CADD") : Brush(dark ? "#20222C" : "#FFFFFF"),
+            BorderBrush = device.IsDefault ? Brush("#4C5872") : Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(14, 12, 14, 12),
@@ -704,9 +725,9 @@ internal sealed class SettingsWindow : Window
             Height = 48,
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
-            BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
-            Background = Brush(dark ? "#152033" : "#F8FBFF"),
-            Child = new TextBlock { Text = device.Kind == AudioDeviceKind.Output ? "OUT" : "IN", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = Brush("#246BFE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
+            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            Child = new TextBlock { Text = device.Kind == AudioDeviceKind.Output ? "OUT" : "IN", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = Brush("#4C5872"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }
         });
         var labels = new StackPanel { Margin = new Thickness(14, 0, 14, 0), VerticalAlignment = VerticalAlignment.Center };
         labels.Children.Add(new TextBlock { Text = device.Name, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
@@ -810,7 +831,7 @@ internal sealed class SettingsWindow : Window
             Padding = new Thickness(10, 7, 10, 7),
             Background = Background,
             Foreground = Foreground,
-            BorderBrush = Brush("#D9E1EC"),
+            BorderBrush = Brush("#DADCE3"),
             BorderThickness = new Thickness(1)
         };
         Grid.SetColumn(value, 1);
@@ -832,7 +853,7 @@ internal sealed class SettingsWindow : Window
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
-        var action = new Button { Content = T("立即截图", "Capture now"), Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 18, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brush("#246BFE"), Foreground = Brushes.White, BorderBrush = Brush("#246BFE") };
+        var action = new Button { Content = T("立即截图", "Capture now"), Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 18, 0, 0), HorizontalAlignment = HorizontalAlignment.Left, Background = Brush("#4C5872"), Foreground = Brushes.White, BorderBrush = Brush("#4C5872") };
         action.Click += (_, _) => captureAction();
         var captureCard = Card(T("截图工作台", "Capture workspace"), T("框选任意显示器上的区域，然后使用标注工具、精确像素尺寸、撤销、保存和剪贴板输出。", "Select a region on any display, then annotate, set exact pixel size, undo, save, or copy it."), dark, action);
         captureCard.Margin = new Thickness(0, 0, 9, 0);
@@ -869,7 +890,7 @@ internal sealed class SettingsWindow : Window
                 Padding = new Thickness(5),
                 Margin = new Thickness(0, 0, 8, 0),
                 BorderThickness = new Thickness(selected ? 3 : 1),
-                BorderBrush = selected ? Brush("#246BFE") : Brush(dark ? "#59667A" : "#BFC8D6"),
+                BorderBrush = selected ? Brush("#4C5872") : Brush(dark ? "#59667A" : "#BFC8D6"),
                 Content = new Border
                 {
                     Width = 16,
@@ -931,7 +952,7 @@ internal sealed class SettingsWindow : Window
         preview.Children.Add(new TextBlock { Text = T("预览", "Preview"), FontSize = 12, Foreground = Muted(dark), Margin = new Thickness(0, 0, 0, 12) });
         preview.Children.Add(new Border { Height = Math.Min(12, defaults.StrokeWidth), Background = Brush(defaults.Color), CornerRadius = new CornerRadius(6), Margin = new Thickness(0, 0, 0, 18) });
         preview.Children.Add(new TextBlock { Text = "Aa  标注文字 / Annotation", FontSize = Math.Min(32, defaults.FontSize), FontWeight = ScreenshotFontWeight(defaults.FontWeight), Foreground = Brush(defaults.Color), TextWrapping = TextWrapping.Wrap });
-        var previewCard = new Border { Child = preview, Background = Brush(dark ? "#111B2B" : "#FFFFFF"), BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(18), Margin = new Thickness(28, 0, 0, 0) };
+        var previewCard = new Border { Child = preview, Background = Brush(dark ? "#20222C" : "#FFFFFF"), BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(18), Margin = new Thickness(28, 0, 0, 0) };
         Grid.SetColumn(previewCard, 1);
         defaultsGrid.Children.Add(previewCard);
         var defaultsCard = WaccCard(defaultsGrid, dark);
@@ -1050,8 +1071,8 @@ internal sealed class SettingsWindow : Window
         {
             Child = panel,
             Padding = new Thickness(16),
-            Background = Brush(dark ? "#152033" : "#F8FBFF"),
-            BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8)
         };
@@ -1170,8 +1191,8 @@ internal sealed class SettingsWindow : Window
             panel.Children.Add(new Border
             {
                 Child = section, Padding = new Thickness(14, 12, 14, 4), CornerRadius = new CornerRadius(8),
-                Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#152033" : "#F8FBFF"),
-                BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"), BorderThickness = new Thickness(1)
+                Margin = new Thickness(0, 0, 0, 10), Background = Brush(dark ? "#262832" : "#FFFFFF"),
+                BorderBrush = Brush(dark ? "#444754" : "#DADCE3"), BorderThickness = new Thickness(1)
             });
         }
 
@@ -1361,8 +1382,8 @@ internal sealed class SettingsWindow : Window
         {
             Child = panel,
             Padding = new Thickness(16),
-            Background = Brush(dark ? "#152033" : "#F8FBFF"),
-            BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF"),
+            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8)
         };
@@ -1611,9 +1632,9 @@ internal sealed class SettingsWindow : Window
     private Style BuildButtonStyle(bool dark)
     {
         var style = new Style(typeof(Button));
-        style.Setters.Add(new Setter(Control.BackgroundProperty, Brush(dark ? "#111B2B" : "#FFFFFF")));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, Brush(dark ? "#20222C" : "#FFFFFF")));
         style.Setters.Add(new Setter(Control.ForegroundProperty, Foreground));
-        style.Setters.Add(new Setter(Control.BorderBrushProperty, Brush(dark ? "#334158" : "#D9E1EC")));
+        style.Setters.Add(new Setter(Control.BorderBrushProperty, Brush(dark ? "#444754" : "#DADCE3")));
         style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
         style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 6, 12, 6)));
         style.Setters.Add(new Setter(Control.CursorProperty, Cursors.Hand));
@@ -1632,8 +1653,9 @@ internal sealed class SettingsWindow : Window
         presenter.SetBinding(ContentPresenter.MarginProperty, new Binding(nameof(Control.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
         border.AppendChild(presenter);
         template.VisualTree = border;
+        ButtonFeedback.Apply(template, "buttonBorder");
         var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-        hover.Setters.Add(new Setter(Border.BorderBrushProperty, Brush("#246BFE"), "buttonBorder"));
+        hover.Setters.Add(new Setter(Border.BorderBrushProperty, Brush("#4C5872"), "buttonBorder"));
         template.Triggers.Add(hover);
         var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
         disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.45));
@@ -1654,8 +1676,8 @@ internal sealed class SettingsWindow : Window
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
-            BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
-            Background = Brush(dark ? "#152033" : "#F8FBFF")
+            BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
+            Background = Brush(dark ? "#262832" : "#FFFFFF")
         };
     }
 
@@ -1665,8 +1687,8 @@ internal sealed class SettingsWindow : Window
         Padding = new Thickness(16),
         CornerRadius = new CornerRadius(8),
         BorderThickness = new Thickness(1),
-        BorderBrush = Brush(dark ? "#334158" : "#D9E1EC"),
-        Background = Brush(dark ? "#152033" : "#F8FBFF")
+        BorderBrush = Brush(dark ? "#444754" : "#DADCE3"),
+        Background = Brush(dark ? "#262832" : "#FFFFFF")
     };
 
     private static SolidColorBrush Brush(string color)

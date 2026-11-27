@@ -155,8 +155,8 @@ internal sealed class NotebookWindow : Window
     private void ApplyTheme()
     {
         var dark = JsonSerializer.SerializeToElement(service.Settings()).GetProperty("theme").GetString() == "Dark";
-        var surface = new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark ? "#111B2B" : "#FAFCFF"));
-        var line = new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark ? "#334158" : "#D9E1EC"));
+        var surface = new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark ? "#20222C" : "#F9F9FB"));
+        var line = new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark ? "#444754" : "#DADCE3"));
         Background = surface; frame.Background = surface; frame.BorderBrush = line;
         if (shell.Children.Count > 1) shell.Children.RemoveAt(1);
         var bar = new DockPanel { Background = surface, LastChildFill = true };

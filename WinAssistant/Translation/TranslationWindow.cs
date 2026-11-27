@@ -102,13 +102,13 @@ internal sealed class TranslationWindow : Window
     private void Build(Action openSettings)
     {
         var dark = ConfigurationStore.Shared.Configuration.Audio.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase);
-        Background = ColorBrush(dark ? "#111B2B" : "#F6F8FC");
+        Background = ColorBrush(dark ? "#20222C" : "#F0F1F6");
         Resources["CaptionText"] = Foreground = ColorBrush(dark ? "#ECF2FA" : "#172235");
-        Resources["CaptionSurface"] = ColorBrush(dark ? "#152033" : "#FFFFFF");
+        Resources["CaptionSurface"] = ColorBrush(dark ? "#262832" : "#FFFFFF");
         Resources["CaptionMuted"] = ColorBrush(dark ? "#AABBD0" : "#52627A");
-        Resources["CaptionLine"] = ColorBrush(dark ? "#334158" : "#D9E1EC");
-        Resources["CaptionHighlight"] = ColorBrush(dark ? "#1E3554" : "#EAF2FE");
-        Resources["CaptionAccent"] = ColorBrush("#246BFE");
+        Resources["CaptionLine"] = ColorBrush(dark ? "#444754" : "#DADCE3");
+        Resources["CaptionHighlight"] = ColorBrush(dark ? "#393E50" : "#E1E5EE");
+        Resources["CaptionAccent"] = ColorBrush("#4C5872");
         Resources["CaptionDanger"] = ColorBrush("#B33D4C");
         Resources.MergedDictionaries.Add(new ResourceDictionary
         {

@@ -1,15 +1,15 @@
 :root {
   color-scheme: light;
-  --bg: #f2f7fe;
+  --bg: #f0f1f6;
   --surface: #fff;
-  --panel: #f8fbff;
-  --line: #d9e1ec;
-  --text: #19263b;
-  --muted: #72829a;
-  --accent: #246bfe;
-  --selected: #e8f1ff;
-  --code: #f5f8fd;
-  --title: #f8fbff;
+  --panel: #f9f9fb;
+  --line: #dadce3;
+  --text: #20212a;
+  --muted: #636674;
+  --accent: #4c5872;
+  --selected: #e1e5ee;
+  --code: #f3f4f7;
+  --title: #f9f9fb;
   font:
     14px -apple-system,
     BlinkMacSystemFont,
@@ -19,15 +19,15 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b1422;
-  --surface: #111b2b;
-  --panel: #152033;
-  --line: #334158;
+  --bg: #191a21;
+  --surface: #20222c;
+  --panel: #262832;
+  --line: #444754;
   --text: #e5edf7;
   --muted: #9aabc2;
-  --selected: #203857;
-  --code: #152033;
-  --title: #111b2b;
+  --selected: #393e50;
+  --code: #262832;
+  --title: #20222c;
 }
 * {
   box-sizing: border-box;
@@ -55,6 +55,12 @@ button {
   justify-content: center;
   gap: 8px;
 }
+@media (prefers-reduced-motion: no-preference) {
+  button {
+    transition: background-color 130ms ease-out, opacity 100ms ease-out;
+  }
+}
+button:active:not(:disabled) { opacity: .72; }
 button:hover {
   background: var(--selected);
 }
@@ -73,7 +79,7 @@ button:disabled {
   color: white;
 }
 .primary:hover {
-  background: #1855d4;
+  background: #384258;
 }
 .danger {
   color: #dc4455;

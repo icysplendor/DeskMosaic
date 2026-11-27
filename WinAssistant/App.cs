@@ -355,7 +355,8 @@ internal sealed class App : Application
         if (hotKeyManager is null) return;
         if (settingsWindow is null)
         {
-            settingsWindow = new SettingsWindow(hotKeyManager, StartCapture, audioState, ReloadHotKeys);
+            settingsWindow = new SettingsWindow(hotKeyManager, StartCapture, audioState, ReloadHotKeys,
+                () => OpenNotebook("quick"), () => OpenNotebook(), OpenTranslation);
             settingsWindow.Closed += (_, _) => settingsWindow = null;
         }
         settingsWindow.Show();

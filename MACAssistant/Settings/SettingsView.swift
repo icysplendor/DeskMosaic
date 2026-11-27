@@ -3,11 +3,12 @@ import SwiftUI
 
 struct SettingsView: View {
     enum Page: String, CaseIterable, Identifiable {
-        case audio, screenshot, displays, mouse, hotkeys, general, translation
+        case overview, audio, screenshot, translation, displays, mouse, hotkeys, general
 
         var id: String { rawValue }
         var symbol: String {
             switch self {
+            case .overview: return "square.grid.2x2"
             case .audio: return "speaker.wave.2"
             case .displays: return "display"
             case .screenshot: return "camera.viewfinder"
@@ -34,21 +35,22 @@ struct SettingsView: View {
     init(page: Binding<Page>) { _page = page }
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : .white }
-    private var panel: Color { dark ? Color(red: 0.082, green: 0.125, blue: 0.2) : Color(red: 0.973, green: 0.984, blue: 1) }
-    private var line: Color { dark ? Color(red: 0.2, green: 0.255, blue: 0.345) : Color(red: 0.851, green: 0.882, blue: 0.925) }
-    private let accent = Color(red: 0.141, green: 0.42, blue: 0.996)
+    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 240/255, green: 241/255, blue: 246/255) }
+    private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
+    private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
+    private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
 
     var body: some View {
         VStack(spacing: 0) {
             applicationTitleBar
-            pageHeader
-            pageTabs
+            if page != .overview { pageHeader }
             ScrollView {
                 pageContent
                     .padding(.horizontal, 18)
-                    .padding(.bottom, 18)
+                    .padding(.bottom, 12)
             }
+            Divider()
+            pageTabs
         }
         .background(surface)
         .font(.system(size: 13))
@@ -131,7 +133,7 @@ struct SettingsView: View {
             .background(surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPlainButtonStyle())
         .help(dark ? t("切换到浅色模式", "Switch to light mode") : t("切换到深色模式", "Switch to dark mode"))
     }
 
@@ -152,7 +154,7 @@ struct SettingsView: View {
                 .frame(width: 22, height: 28)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeskPlainButtonStyle())
         .accessibilityLabel(help)
         .help(help)
     }
@@ -193,12 +195,13 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(.horizontal, 18)
-        .padding(.bottom, 16)
+        .padding(.vertical, 10)
         .background(surface)
     }
 
     @ViewBuilder private var pageContent: some View {
         switch page {
+        case .overview: overviewPage
         case .audio: audioPage
         case .displays: displaysPage
         case .screenshot: screenshotPage
@@ -208,6 +211,116 @@ struct SettingsView: View {
         case .translation:
             TranslationSettingsView()
         }
+    }
+
+    private var overviewPage: some View {
+        let enabled = audio.isEnabled
+        let output = enabled ? audio.currentOutput : nil
+        let input = enabled ? audio.currentInput : nil
+        let active = audio.profiles.first { $0.outputDeviceID == output?.id && $0.inputDeviceID == input?.id }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(t("系统摘要", "System summary")).fontWeight(.semibold)
+                Text(!enabled ? t("音频未启用", "Audio inactive")
+                     : audio.profiles.isEmpty ? t("尚未保存配置组", "No saved profiles")
+                     : t("已保存 \(audio.profiles.count) 个配置组", "\(audio.profiles.count) saved profiles"))
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .foregroundStyle(Color.black)
+                    .background(Color(red: 253/255, green: 244/255, blue: 165/255))
+            }
+            .padding(.vertical, 9)
+            GeometryReader { geometry in
+                let width = geometry.size.width - 16
+                HStack(alignment: .top, spacing: 8) {
+                    overviewTile(active == nil ? t("当前播放设备", "Current output") : t("当前音频配置", "Current audio profile")) {
+                        HStack {
+                            Text(!enabled ? t("音频未启用", "Audio inactive") : active?.name ?? output?.name ?? t("无播放设备", "No output device"))
+                                .font(.system(size: 40)).lineLimit(2)
+                            Spacer()
+                            Image("OverviewSpeakers").resizable().scaledToFit().frame(width: 84)
+                                .accessibilityHidden(true)
+                        }
+                        Text(t("播放设备　", "Output   ") + (output?.name ?? "—")).lineLimit(1)
+                        Text(t("麦克风　", "Input   ") + (input?.name ?? "—")).lineLimit(1)
+                    }
+                    .frame(width: width * 0.48)
+                    overviewTile(t("区域截图", "Region capture")) {
+                        Text(t("拖选屏幕区域，可标注或录屏。", "Select a region to annotate or record.")).font(.caption).foregroundStyle(.secondary)
+                        Image("CaptureContours").resizable().scaledToFit().frame(maxWidth: .infinity)
+                            .frame(height: 118).accessibilityHidden(true)
+                        Button { ScreenshotManager.shared.startCapture() } label: {
+                            Text(t("开始框选截图", "Select region to capture")).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(WaccPrimaryButtonStyle(accent: accent))
+                    }
+                    .frame(width: width * 0.32)
+                    overviewTile(t("设备配置组", "Device profiles")) {
+                        Text(t("一键切换播放设备和麦克风。", "Switch output and microphone together.")).font(.caption).foregroundStyle(.secondary)
+                        if enabled {
+                            ForEach(audio.profiles.prefix(3)) { profile in
+                                let selected = active?.id == profile.id
+                                let online = audio.outputs.contains { $0.id == profile.outputDeviceID }
+                                    && audio.inputs.contains { $0.id == profile.inputDeviceID }
+                                overviewButton((selected ? "✓  " : "") + profile.name + (online ? "" : t(" · 离线", " · Offline"))) {
+                                    audio.activateProfile(id: profile.id)
+                                }
+                                .disabled(selected || !online)
+                            }
+                        }
+                        overviewButton(enabled && audio.profiles.isEmpty ? t("设置配置组", "Set up profiles") : t("音频设置", "Audio settings")) { page = .audio }
+                    }
+                    .frame(width: width * 0.20)
+                }
+            }
+            .frame(height: 266)
+            GeometryReader { geometry in
+                HStack(alignment: .top, spacing: 8) {
+                    overviewTile(t("音量控制", "Volume levels")) {
+                        if enabled {
+                            overviewLevel(t("输出音量", "Output volume"), device: output)
+                            Divider()
+                            overviewLevel(t("麦克风音量", "Microphone level"), device: input)
+                        } else {
+                            overviewButton(t("音频设置", "Audio settings")) { page = .audio }
+                        }
+                    }
+                    .frame(width: (geometry.size.width - 16) * 0.48)
+                    overviewTile(t("常用操作", "Quick actions")) {
+                        overviewButton(t("新建快速笔记", "New quick note")) { NotebookWindowController.shared.show(intent: "quick") }
+                        overviewButton(t("打开笔记本", "Open notebook")) { NotebookWindowController.shared.show() }
+                        overviewButton(t("打开录写与翻译", "Open transcription and translation")) { TranslationWindowController.shared.show() }
+                    }
+                }
+            }
+            .frame(height: 212)
+        }
+    }
+
+    private func overviewTile<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).fontWeight(.semibold)
+            content()
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(panel, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+    }
+
+    private func overviewLevel(_ label: String, device: AudioDeviceInfo?) -> some View {
+        OverviewVolumeLevel(label: label, value: Binding(
+            get: { device?.volume ?? 0 },
+            set: { if let device { audio.setVolume($0, for: device) } }
+        ), available: device != nil, surface: panel)
+    }
+
+    private func overviewButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(WaccButtonStyle(surface: surface, line: line))
+        .help(title)
     }
 
     private var audioPage: some View {
@@ -324,7 +437,7 @@ struct SettingsView: View {
                 .frame(width: 68, height: 34)
                 .background(active ? accent : surface, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : line))
-                .buttonStyle(.plain)
+                .buttonStyle(DeskPlainButtonStyle())
                 .disabled(active || !outputOnline || !inputOnline)
             Button(role: .destructive) { audio.deleteProfile(id: profile.id) } label: {
                 Image(systemName: "trash")
@@ -416,7 +529,7 @@ struct SettingsView: View {
                                         .background(surface, in: RoundedRectangle(cornerRadius: 8))
                                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(settings.screenshotAnnotationColor == choice.hex ? accent : line, lineWidth: settings.screenshotAnnotationColor == choice.hex ? 3 : 1))
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(DeskPlainButtonStyle())
                             }
                         }
                         screenshotDefaultPicker(t("线条粗细", "Stroke width"), selection: Binding(get: { settings.screenshotStrokeWidth }, set: settings.setScreenshotStrokeWidth), values: [1, 2, 3, 5, 8, 12])
@@ -733,7 +846,8 @@ struct SettingsView: View {
 
     private func pageName(_ value: Page) -> String {
         switch value {
-        case .audio: return t("音频中心", "Audio")
+        case .overview: return t("总览", "Overview")
+        case .audio: return t("音频", "Audio")
         case .displays: return t("显示器", "Displays")
         case .screenshot: return t("截图", "Screenshot")
         case .mouse: return t("鼠标", "Mouse")
@@ -746,6 +860,7 @@ struct SettingsView: View {
     private var pageTitle: String { page == .audio ? t("音频控制中心", "Audio Control Center") : pageName(page) }
     private var pageSubtitle: String {
         switch page {
+        case .overview: return ""
         case .audio: return t("用配置组整体切换输入与输出，并锁定当前设备组合。", "Switch input and output together with profiles and lock the active pair.")
         case .displays: return t("调整分辨率，并为常用显示模式设置快捷键。", "Adjust resolutions and assign hotkeys to display modes.")
         case .screenshot: return t("跨显示器捕捉、标注、保存并复制到剪贴板。", "Capture across displays, annotate, save, and copy.")
@@ -770,6 +885,7 @@ private struct WaccButtonStyle: ButtonStyle {
             .padding(.vertical, 7)
             .background(surface.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+            .modifier(DeskPressFeedback(pressed: configuration.isPressed))
     }
 }
 
@@ -783,6 +899,7 @@ private struct WaccPrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
             .background(accent.opacity(configuration.isPressed ? 0.78 : 1), in: RoundedRectangle(cornerRadius: 8))
+            .modifier(DeskPressFeedback(pressed: configuration.isPressed))
     }
 }
 
@@ -796,11 +913,65 @@ private struct WaccTabButtonStyle: ButtonStyle {
         configuration.label
             .fontWeight(.semibold)
             .foregroundStyle(selected ? Color.white : Color.primary)
-            .frame(minWidth: 92)
+            .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(selected ? accent : panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? accent : line))
-            .opacity(configuration.isPressed ? 0.76 : 1)
+            .background(selected ? accent : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selected ? accent : Color.clear))
+            .modifier(DeskPressFeedback(pressed: configuration.isPressed))
+    }
+}
+
+private struct OverviewVolumeLevel: View {
+    let label: String
+    @Binding var value: Double
+    let available: Bool
+    let surface: Color
+    @State private var hovering = false
+    @State private var editing = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .lastTextBaseline) {
+                Text(available ? "\(Int((value * 100).rounded()))%" : "—")
+                    .font(.system(size: 28)).monospacedDigit()
+                Text(label)
+            }
+            Slider(value: $value, in: 0...1, onEditingChanged: { editing = $0 })
+                .focused($focused).disabled(!available).accessibilityLabel(label)
+                .frame(height: 24)
+                .overlay {
+                    if !hovering && !focused && !editing {
+                        HStack(spacing: 2) {
+                            ForEach(0..<40, id: \.self) { index in
+                                Rectangle().fill(index < Int((value * 40).rounded())
+                                    ? Color(red: 0.62, green: 0.67, blue: 0.77) : Color.secondary.opacity(0.2))
+                            }
+                        }
+                        .frame(height: 14).frame(maxHeight: .infinity)
+                        .background(surface).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+struct DeskPressFeedback: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let pressed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(pressed ? 0.78 : 1)
+            .scaleEffect(pressed && !reduceMotion ? 0.98 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: pressed)
+    }
+}
+
+struct DeskPlainButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.modifier(DeskPressFeedback(pressed: configuration.isPressed))
     }
 }
 
@@ -828,7 +999,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, ObservableObje
     static let shared = SettingsWindowController()
     private var settingsWindow: NSWindow?
 
-    @Published var page: SettingsView.Page = .audio
+    @Published var page: SettingsView.Page = .overview
 
     func show(page: SettingsView.Page? = nil) {
         if let page { self.page = page }

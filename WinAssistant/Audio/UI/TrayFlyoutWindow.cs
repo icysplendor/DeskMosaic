@@ -68,9 +68,9 @@ internal sealed class TrayFlyoutWindow : Window
     private string T(string chinese, string english) => English ? english : chinese;
     private SolidColorBrush TextBrush(bool dark) => Brush(dark ? "#F7F9FC" : "#161B28");
     private SolidColorBrush MutedBrush(bool dark) => Brush(dark ? "#AEB8C8" : "#626B7C");
-    private SolidColorBrush PanelBrush(bool dark) => Brush(dark ? "#152033" : "#F8FBFF");
-    private SolidColorBrush SurfaceBrush(bool dark) => Brush(dark ? "#0E1726" : "#FFFFFF");
-    private SolidColorBrush LineBrush(bool dark) => Brush(dark ? "#344158" : "#D9E1EC");
+    private SolidColorBrush PanelBrush(bool dark) => Brush(dark ? "#262832" : "#FFFFFF");
+    private SolidColorBrush SurfaceBrush(bool dark) => Brush(dark ? "#1B1D25" : "#FFFFFF");
+    private SolidColorBrush LineBrush(bool dark) => Brush(dark ? "#444754" : "#DADCE3");
 
     private void Render()
     {
@@ -198,12 +198,11 @@ internal sealed class TrayFlyoutWindow : Window
         var input = snapshot.AllInputs.FirstOrDefault(device => AudioDeviceInfo.IdEquals(device.Id, profile.InputDeviceId));
         var active = AudioDeviceInfo.IdEquals(snapshot.CurrentOutput?.Id, profile.OutputDeviceId)
             && AudioDeviceInfo.IdEquals(snapshot.CurrentInput?.Id, profile.InputDeviceId);
-        var border = new Border
+        var button = new Button
         {
-            Background = active ? Brush(dark ? "#243A67" : "#22246BFE") : SurfaceBrush(dark),
-            BorderBrush = active ? Brush("#246BFE") : LineBrush(dark),
+            Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
+            BorderBrush = active ? Brush("#4C5872") : LineBrush(dark),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
             Margin = new Thickness(0, 0, 0, 8),
             Padding = new Thickness(10, 8, 10, 8),
             MinHeight = 54,
@@ -214,7 +213,7 @@ internal sealed class TrayFlyoutWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
-        grid.Children.Add(new TextBlock { Text = "PAIR", FontSize = 10, FontWeight = FontWeights.Bold, Foreground = Brush("#246BFE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        grid.Children.Add(new TextBlock { Text = active ? "✓" : "○", FontSize = 10, FontWeight = FontWeights.Bold, Foreground = MutedBrush(dark), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         var labels = new StackPanel { Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         labels.Children.Add(new TextBlock { Text = profile.Name, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         labels.Children.Add(new TextBlock
@@ -227,12 +226,13 @@ internal sealed class TrayFlyoutWindow : Window
         });
         Grid.SetColumn(labels, 1);
         grid.Children.Add(labels);
-        var radio = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(2), BorderBrush = active ? Brush("#246BFE") : MutedBrush(dark), Background = active ? Brush("#246BFE") : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var radio = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(2), BorderBrush = active ? Brush("#4C5872") : MutedBrush(dark), Background = active ? Brush("#4C5872") : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(radio, 2);
         grid.Children.Add(radio);
-        border.Child = grid;
-        border.MouseLeftButtonUp += (_, _) => { state.ActivateProfile(profile.Id); Hide(); };
-        return border;
+        button.Content = grid;
+        System.Windows.Automation.AutomationProperties.SetName(button, profile.Name);
+        button.Click += (_, _) => { state.ActivateProfile(profile.Id); Hide(); };
+        return button;
     }
 
     private void AddDeviceRows(Panel panel, IReadOnlyList<AudioDeviceInfo> devices, AudioDeviceInfo? current, bool dark)
@@ -249,8 +249,8 @@ internal sealed class TrayFlyoutWindow : Window
     {
         var border = new Border
         {
-            Background = current ? Brush(dark ? "#243A67" : "#22246BFE") : SurfaceBrush(dark),
-            BorderBrush = current ? Brush("#246BFE") : LineBrush(dark),
+            Background = current ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
+            BorderBrush = current ? Brush("#4C5872") : LineBrush(dark),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Margin = new Thickness(0, 0, 0, 8),
@@ -262,13 +262,13 @@ internal sealed class TrayFlyoutWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
-        grid.Children.Add(new TextBlock { Text = device.Kind == AudioDeviceKind.Output ? "OUT" : "IN", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brush("#246BFE"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        grid.Children.Add(new TextBlock { Text = device.Kind == AudioDeviceKind.Output ? "OUT" : "IN", FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Brush("#4C5872"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         var labels = new StackPanel { Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         labels.Children.Add(new TextBlock { Text = device.Name, FontSize = 13, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });
         labels.Children.Add(new TextBlock { Text = current ? T("默认", "Default") : device.Volume.ToString("P0"), FontSize = 11, Foreground = MutedBrush(dark), Margin = new Thickness(0, 2, 0, 0) });
         Grid.SetColumn(labels, 1);
         grid.Children.Add(labels);
-        var radio = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(2), BorderBrush = current ? Brush("#246BFE") : MutedBrush(dark), Background = current ? Brush("#246BFE") : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+        var radio = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(2), BorderBrush = current ? Brush("#4C5872") : MutedBrush(dark), Background = current ? Brush("#4C5872") : Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(radio, 2);
         grid.Children.Add(radio);
         border.Child = grid;
@@ -337,6 +337,7 @@ internal sealed class TrayFlyoutWindow : Window
         presenter.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
         border.AppendChild(presenter);
         template.VisualTree = border;
+        ButtonFeedback.Apply(template, "Root");
         style.Setters.Add(new Setter(Control.TemplateProperty, template));
         return style;
     }
