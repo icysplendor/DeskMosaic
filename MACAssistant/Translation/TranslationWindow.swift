@@ -624,7 +624,7 @@ private struct TranslationWindowView: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                Button(t("取消", "Cancel")) { confirmingClear = false }
+                Button(t("保留字幕", "Keep captions")) { confirmingClear = false }
                     .keyboardShortcut(.cancelAction)
                 Button(t("清空字幕", "Clear captions"), role: .destructive) {
                     controller.clearTranscript()

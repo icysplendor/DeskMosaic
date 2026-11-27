@@ -866,7 +866,7 @@ internal sealed class TranslationWindow : Window
         };
         var cancel = new Button
         {
-            Content = T("取消", "Cancel"), IsCancel = true, IsDefault = true, Foreground = Foreground,
+            Content = T("保留字幕", "Keep captions"), IsCancel = true, IsDefault = true, Foreground = Foreground,
             Background = (Brush)Resources["CaptionSurface"], BorderBrush = Line, Style = (Style)Resources["CaptionButton"]
         };
         var confirm = new Button
