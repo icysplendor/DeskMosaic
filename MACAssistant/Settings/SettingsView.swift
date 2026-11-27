@@ -36,7 +36,7 @@ struct SettingsView: View {
     init(page: Binding<Page>) { _page = page }
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 240/255, green: 241/255, blue: 246/255) }
+    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 250/255, green: 250/255, blue: 251/255) }
     private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
     private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
     private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
@@ -226,8 +226,8 @@ struct SettingsView: View {
                      : audio.profiles.isEmpty ? t("尚未保存配置组", "No saved profiles")
                      : t("已保存 \(audio.profiles.count) 个配置组", "\(audio.profiles.count) saved profiles"))
                     .padding(.horizontal, 10).padding(.vertical, 3)
-                    .foregroundStyle(Color.black)
-                    .background(Color(red: 253/255, green: 244/255, blue: 165/255))
+                    .foregroundStyle(!enabled || audio.profiles.isEmpty ? Color.black : Color.secondary)
+                    .background(!enabled || audio.profiles.isEmpty ? Color(red: 253/255, green: 244/255, blue: 165/255) : Color.clear)
             }
             .padding(.vertical, 9)
             GeometryReader { geometry in

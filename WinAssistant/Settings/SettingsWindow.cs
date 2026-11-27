@@ -109,7 +109,7 @@ internal sealed partial class SettingsWindow : Window
         Title = T("辅助工具控制中心", "Assistant Control Center");
         var dark = audioState?.Snapshot.Theme == "Dark";
         ThemeManager.ApplyWindowFrame(this, audioState?.Snapshot.Theme);
-        var appBrush = Brush(dark ? "#0B1422" : "#F0F1F6");
+        var appBrush = Brush(dark ? "#0B1422" : "#FAFAFB");
         var lineBrush = Brush(dark ? "#444754" : "#DADCE3");
         Background = appBrush;
         Foreground = Brush(dark ? "#F7F9FC" : "#161B28");

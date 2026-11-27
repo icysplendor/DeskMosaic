@@ -22,13 +22,13 @@ internal sealed partial class SettingsWindow
         summary.Children.Add(new TextBlock { Text = T("系统摘要", "System summary"), FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
         summary.Children.Add(new Border
         {
-            Background = Brush("#FDF4A5"), Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(12, 0, 0, 0),
+            Background = !enabled || snapshot!.Profiles.Count == 0 ? Brush("#FDF4A5") : Brushes.Transparent, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(12, 0, 0, 0),
             Child = new TextBlock
             {
                 Text = !enabled ? T("音频未启用", "Audio inactive")
                     : snapshot!.Profiles.Count == 0 ? T("尚未保存配置组", "No saved profiles")
                     : T($"已保存 {snapshot.Profiles.Count} 个配置组", $"{snapshot.Profiles.Count} saved profiles"),
-                Foreground = Brush("#222431")
+                Foreground = !enabled || snapshot!.Profiles.Count == 0 ? Brush("#222431") : Muted(dark)
             }
         });
         root.Children.Add(summary);

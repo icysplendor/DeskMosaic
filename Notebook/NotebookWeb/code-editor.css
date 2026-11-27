@@ -217,7 +217,7 @@
   border-inline: 1px solid var(--line);
   padding-inline: 6px;
 }
-.code-actions .primary { background: #fdf4a5; color: #222431; }
+.code-window:has(#edit-state[data-dirty="true"]) .code-actions .primary { background: #fdf4a5; color: #222431; }
 .code-actions .primary:disabled { opacity: .5; }
 .code-tools { background: var(--panel); }
 .code-footer { font-variant-numeric: tabular-nums; }

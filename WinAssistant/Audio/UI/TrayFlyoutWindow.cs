@@ -108,7 +108,7 @@ internal sealed class TrayFlyoutWindow : Window
             }, dark, new Thickness(0, 0, 0, 10));
             root.Children.Add(disabled);
         }
-        var exit = new Button { Content = T("退出 DeskMosaic", "Quit DeskMosaic"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0), Padding = new Thickness(8, 3, 8, 3) };
+        var exit = new Button { Content = T("退出 DeskMosaic", "Quit DeskMosaic"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 6, 0, 0), MinHeight = 28, Padding = new Thickness(10, 4, 10, 4) };
         exit.Click += (_, _) => { Hide(); quit(); };
         root.Children.Add(exit);
 
@@ -116,7 +116,7 @@ internal sealed class TrayFlyoutWindow : Window
         {
             Child = root,
             Padding = new Thickness(10),
-            Background = SurfaceBrush(dark),
+            Background = dark ? SurfaceBrush(true) : Brush("#FAFAFB"),
             BorderBrush = LineBrush(dark),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
@@ -207,13 +207,14 @@ internal sealed class TrayFlyoutWindow : Window
             Background = active ? Brush(dark ? "#414758" : "#55C2CADD") : SurfaceBrush(dark),
             BorderBrush = active ? Brush("#4C5872") : LineBrush(dark),
             BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 8),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(2, 2, 2, 4),
             Padding = new Thickness(10, 8, 10, 8),
             MinHeight = 54,
             Cursor = Cursors.Hand,
             IsEnabled = output is not null && input is not null
         };
-        var grid = new Grid { Width = 286 };
+        var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
@@ -262,7 +263,7 @@ internal sealed class TrayFlyoutWindow : Window
             MinHeight = 50,
             Cursor = Cursors.Hand
         };
-        var grid = new Grid { Width = 286 };
+        var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
         grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
@@ -320,6 +321,7 @@ internal sealed class TrayFlyoutWindow : Window
     private Style BuildButtonStyle(bool dark)
     {
         var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Center));
         style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceBrush(dark)));
         style.Setters.Add(new Setter(Control.ForegroundProperty, TextBrush(dark)));
         style.Setters.Add(new Setter(Control.BorderBrushProperty, LineBrush(dark)));
@@ -334,7 +336,7 @@ internal sealed class TrayFlyoutWindow : Window
         border.SetBinding(Border.PaddingProperty, new Binding("Padding") { RelativeSource = RelativeSource.TemplatedParent });
         border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
         var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        presenter.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        presenter.SetBinding(HorizontalAlignmentProperty, new Binding("HorizontalContentAlignment") { RelativeSource = RelativeSource.TemplatedParent });
         presenter.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
         border.AppendChild(presenter);
         template.VisualTree = border;

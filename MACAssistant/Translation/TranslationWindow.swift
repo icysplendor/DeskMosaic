@@ -487,7 +487,7 @@ private struct TranslationWindowView: View {
             }
             return true
         }
-        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 240/255, green: 241/255, blue: 246/255))
+        .background(dark ? Color(red: 0.067, green: 0.106, blue: 0.169) : Color(red: 250/255, green: 250/255, blue: 251/255))
         .preferredColorScheme(dark ? .dark : .light)
         .sheet(isPresented: $confirmingClear) { clearConfirmation }
         .onChange(of: controller.sessionOptions.sessionSourceLanguages) { available in

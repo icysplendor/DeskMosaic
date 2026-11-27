@@ -10,7 +10,7 @@ struct MenuContentView: View {
     @EnvironmentObject private var audio: AudioManager
 
     private var dark: Bool { settings.theme == "Dark" }
-    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 240/255, green: 241/255, blue: 246/255) }
+    private var surface: Color { dark ? Color(white: 0.11) : Color(red: 250/255, green: 250/255, blue: 251/255) }
     private var panel: Color { dark ? Color(red: 0.15, green: 0.16, blue: 0.20) : .white }
     private var line: Color { dark ? Color(white: 0.28) : Color(red: 0.85, green: 0.86, blue: 0.89) }
     private let accent = Color(red: 0.30, green: 0.35, blue: 0.45)
@@ -33,10 +33,7 @@ struct MenuContentView: View {
             }
             if audio.isEnabled {
                 currentDevices
-                ScrollView {
-                    audioProfiles
-                }
-                .frame(height: audioProfilesHeight)
+                audioProfiles
             } else {
                 audioDisabledNotice
             }
@@ -46,6 +43,7 @@ struct MenuContentView: View {
         .padding(10)
         .frame(width: 330)
         .background(surface)
+        .tint(accent)
         .font(.system(size: 13))
         .preferredColorScheme(dark ? .dark : .light)
         .onAppear {
@@ -70,7 +68,7 @@ struct MenuContentView: View {
         }
         .padding(12)
         .background(panel, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line))
     }
 
     private var currentDevices: some View {
@@ -81,11 +79,7 @@ struct MenuContentView: View {
         }
         .padding(10)
         .background(panel, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
-    }
-
-    private var audioProfilesHeight: CGFloat {
-        audio.profiles.isEmpty ? 52 : min(278, 34 + CGFloat(min(audio.profiles.count, 4)) * 62)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line))
     }
 
     private func currentColumn(kind: AudioDeviceKind, device: AudioDeviceInfo?) -> some View {
@@ -107,7 +101,7 @@ struct MenuContentView: View {
                 Slider(value: .constant(0), in: 0...1).disabled(true)
             }
         }
-        .frame(width: 132)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
     private var audioProfiles: some View {
@@ -125,12 +119,21 @@ struct MenuContentView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 5)
+            } else if audio.profiles.count <= 4 {
+                profileRows
             } else {
-                ForEach(audio.profiles.prefix(4)) { profile in
-                    profileRow(profile)
-                }
+                ScrollView(.vertical) { profileRows.padding(.trailing, 12) }
+                    .frame(height: 4 * 54 + 3 * 6)
             }
         }
+    }
+
+    private var profileRows: some View {
+        VStack(spacing: 6) {
+            ForEach(audio.profiles) { profile in profileRow(profile) }
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
     }
 
     private func profileRow(_ profile: AudioConfigurationProfile) -> some View {
@@ -152,14 +155,14 @@ struct MenuContentView: View {
                 }
                 Spacer()
                 Circle()
-                    .stroke(active ? accent : Color.secondary, lineWidth: 2)
+                    .strokeBorder(active ? accent : Color.secondary, lineWidth: 2)
                     .background(Circle().fill(active ? accent : Color.clear))
                     .frame(width: 18, height: 18)
             }
             .padding(.horizontal, 10)
-            .frame(minHeight: 54)
-            .background(active ? accent.opacity(0.13) : surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : line))
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .background(active ? accent.opacity(dark ? 0.32 : 0.12) : panel, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(active ? accent : line))
         }
         .buttonStyle(DeskPlainButtonStyle())
         .disabled(outputName == nil || inputName == nil)
@@ -187,7 +190,7 @@ struct MenuContentView: View {
             .menuStyle(.borderlessButton)
             .padding(8)
             .background(panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line))
 
             Menu {
                 ForEach(MouseScrollBehavior.allCases) { behavior in
@@ -212,18 +215,26 @@ struct MenuContentView: View {
             .menuStyle(.borderlessButton)
             .padding(8)
             .background(panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(line))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(line))
         }
     }
 
     private var footer: some View {
         HStack {
             Spacer()
-            Button(appDelegate.isPreparingToQuit ? t("正在退出…", "Quitting…") : t("退出 DeskMosaic", "Quit DeskMosaic")) {
+            Button {
                 performAfterDismiss { NSApp.terminate(nil) }
+            } label: {
+                Label(appDelegate.isPreparingToQuit ? t("正在退出…", "Quitting…") : t("退出 DeskMosaic", "Quit DeskMosaic"),
+                      systemImage: "power")
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 28)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(line))
+                    .contentShape(Rectangle())
             }
             .buttonStyle(DeskPlainButtonStyle())
-            .font(.caption).foregroundStyle(.secondary)
             .disabled(appDelegate.isPreparingToQuit)
         }
     }
@@ -234,8 +245,8 @@ struct MenuContentView: View {
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 5)
-                .background(surface, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(line))
+                .background(panel, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(line))
                 .contentShape(Rectangle())
         }
         .buttonStyle(DeskPlainButtonStyle())

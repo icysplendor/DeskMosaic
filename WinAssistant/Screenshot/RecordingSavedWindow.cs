@@ -93,7 +93,7 @@ internal sealed class RecordingSavedWindow : Window
         {
             Child = file, Padding = new Thickness(12), Margin = new Thickness(18, 16, 18, 0),
             CornerRadius = new CornerRadius(8), BorderBrush = line, BorderThickness = new Thickness(1),
-            Background = Brush(dark ? "#152033" : "#F0F1F6")
+            Background = Brush(dark ? "#152033" : "#FAFAFB")
         });
 
         var error = new TextBlock

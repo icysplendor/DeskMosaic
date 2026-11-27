@@ -102,7 +102,7 @@ internal sealed class TranslationWindow : Window
     private void Build(Action openSettings)
     {
         var dark = ConfigurationStore.Shared.Configuration.Audio.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase);
-        Background = ColorBrush(dark ? "#20222C" : "#F0F1F6");
+        Background = ColorBrush(dark ? "#20222C" : "#FAFAFB");
         Resources["CaptionText"] = Foreground = ColorBrush(dark ? "#ECF2FA" : "#172235");
         Resources["CaptionSurface"] = ColorBrush(dark ? "#262832" : "#FFFFFF");
         Resources["CaptionMuted"] = ColorBrush(dark ? "#AABBD0" : "#52627A");
