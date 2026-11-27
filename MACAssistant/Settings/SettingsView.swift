@@ -73,19 +73,6 @@ struct SettingsView: View {
         ZStack {
             WindowDragRegion()
             HStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    windowControl(color: Color(red: 1, green: 0.37, blue: 0.34), symbol: "xmark", help: t("关闭", "Close")) {
-                        activeWindow?.performClose(nil)
-                    }
-                    windowControl(color: Color(red: 1, green: 0.74, blue: 0.22), symbol: "minus", help: t("最小化", "Minimize")) {
-                        activeWindow?.miniaturize(nil)
-                    }
-                    windowControl(color: Color(red: 0.18, green: 0.78, blue: 0.35), symbol: "plus", help: t("缩放", "Zoom")) {
-                        activeWindow?.zoom(nil)
-                    }
-                }
-                .padding(.trailing, 10)
-
                 Image("AppEmblem")
                     .resizable()
                     .interpolation(.high)
@@ -110,6 +97,7 @@ struct SettingsView: View {
                 }
                 Spacer()
                 titleBarThemeSwitch
+                DeskCaptionControls().padding(.leading, 8)
             }
             .padding(.horizontal, 18)
         }
@@ -141,28 +129,6 @@ struct SettingsView: View {
         }
         .buttonStyle(DeskPlainButtonStyle())
         .help(dark ? t("切换到浅色模式", "Switch to light mode") : t("切换到深色模式", "Switch to dark mode"))
-    }
-
-    private var activeWindow: NSWindow? {
-        NSApp.keyWindow ?? NSApp.mainWindow
-    }
-
-    private func windowControl(color: Color, symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Circle()
-                .fill(color)
-                .frame(width: 14, height: 14)
-                .overlay {
-                    Image(systemName: symbol)
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.58))
-                }
-                .frame(width: 22, height: 28)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(DeskPlainButtonStyle())
-        .accessibilityLabel(help)
-        .help(help)
     }
 
     private var pageHeader: some View {
@@ -992,6 +958,115 @@ struct DeskPlainButtonStyle: ButtonStyle {
     }
 }
 
+@MainActor
+enum DeskWindowChrome {
+    static func configure(_ window: NSWindow) {
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.styleMask.insert(.fullSizeContentView)
+        for type: NSWindow.ButtonType in [.miniaturizeButton, .zoomButton, .closeButton] {
+            window.standardWindowButton(type)?.isHidden = true
+        }
+    }
+
+    static func wrap(_ content: NSView, in window: NSWindow, title: String) {
+        configure(window)
+        let bounds = window.contentView?.bounds ?? content.bounds
+        let root = NSView(frame: bounds)
+        let header = NotebookTitlebar(frame: NSRect(x: 0, y: bounds.height - 38, width: bounds.width, height: 38))
+        header.autoresizingMask = [.width, .minYMargin]
+        let label = NSTextField(labelWithString: title)
+        label.frame = NSRect(x: 14, y: 9, width: bounds.width - 165, height: 20)
+        label.autoresizingMask = [.width]
+        label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.bind(.value, to: window, withKeyPath: "title", options: nil)
+        header.addSubview(label)
+        addControls(to: header)
+        content.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - 38)
+        content.autoresizingMask = [.width, .height]
+        root.addSubview(content)
+        root.addSubview(header)
+        window.contentView = root
+    }
+
+    static func addControls(to header: NSView) {
+        let controls = NSHostingView(rootView: DeskCaptionControls())
+        controls.frame = NSRect(x: header.bounds.width - 120, y: (header.bounds.height - 32) / 2, width: 114, height: 32)
+        controls.autoresizingMask = [.minXMargin]
+        header.addSubview(controls)
+    }
+}
+
+private final class CaptionAnchor: NSView {}
+
+private struct CaptionWindowAnchor: NSViewRepresentable {
+    let anchor: CaptionAnchor
+    func makeNSView(context: Context) -> CaptionAnchor { anchor }
+    func updateNSView(_ view: CaptionAnchor, context: Context) {}
+}
+
+struct DeskCaptionControls: View {
+    @State private var anchor = CaptionAnchor()
+    @State private var maximized = false
+    @State private var hover: Int?
+    @ObservedObject private var settings = SettingsManager.shared
+
+    var body: some View {
+        HStack(spacing: 2) {
+            control(0, "最小化", "Minimize")
+            control(1, maximized ? "还原" : "最大化", maximized ? "Restore" : "Maximize")
+            control(2, "关闭", "Close")
+        }
+        .background(CaptionWindowAnchor(anchor: anchor))
+        .onAppear { maximized = anchor.window?.isZoomed == true }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification)) { note in
+            if let window = note.object as? NSWindow, window === anchor.window { maximized = window.isZoomed }
+        }
+    }
+
+    private func control(_ index: Int, _ chinese: String, _ english: String) -> some View {
+        let label = settings.language == "en-US" ? english : chinese
+        return Button {
+            guard let window = anchor.window else { return }
+            switch index {
+            case 0: window.miniaturize(nil)
+            case 1: window.zoom(nil)
+            default: window.performClose(nil)
+            }
+        } label: {
+            Path { path in
+                switch index {
+                case 0:
+                    path.move(to: CGPoint(x: 2, y: 7)); path.addLine(to: CGPoint(x: 12, y: 7))
+                case 1 where maximized:
+                    path.addRect(CGRect(x: 2, y: 5, width: 7, height: 7))
+                    path.addLines([CGPoint(x: 5, y: 3), CGPoint(x: 5, y: 2), CGPoint(x: 12, y: 2),
+                                   CGPoint(x: 12, y: 9), CGPoint(x: 11, y: 9)])
+                case 1:
+                    path.addRect(CGRect(x: 2, y: 2, width: 10, height: 10))
+                default:
+                    path.move(to: CGPoint(x: 2, y: 2)); path.addLine(to: CGPoint(x: 12, y: 12))
+                    path.move(to: CGPoint(x: 12, y: 2)); path.addLine(to: CGPoint(x: 2, y: 12))
+                }
+            }
+                .stroke(lineWidth: 1.4)
+                .frame(width: 14, height: 14)
+                .foregroundStyle(hover == 2 && index == 2 ? Color.white : Color.primary)
+                .frame(width: 36, height: 30)
+                .background(hover == index ? (index == 2 ? Color(red: 0.71, green: 0.23, blue: 0.29) : Color.primary.opacity(0.09)) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(DeskPlainButtonStyle())
+        .onHover { inside in
+            if inside { hover = index } else if hover == index { hover = nil }
+        }
+        .accessibilityLabel(label)
+        .help(label)
+    }
+}
+
 private struct WindowDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         DragView()
@@ -1043,14 +1118,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, ObservableObje
             defer: false
         )
         window.title = "DeskMosaic"
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.styleMask.insert(.fullSizeContentView)
+        DeskWindowChrome.configure(window)
         window.contentView = NSHostingView(rootView: content)
-        window.standardWindowButton(.closeButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
         window.center()

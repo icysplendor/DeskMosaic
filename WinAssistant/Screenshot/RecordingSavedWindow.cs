@@ -1,3 +1,4 @@
+using WinAssistant.Infrastructure;
 using WinAssistant.Audio.UI;
 using System.Diagnostics;
 using System.Windows;
@@ -52,15 +53,7 @@ internal sealed class RecordingSavedWindow : Window
         var body = new StackPanel();
         Content = new Border { Child = body, BorderBrush = line, BorderThickness = new Thickness(1) };
         var header = new DockPanel { Height = 55, Margin = new Thickness(18, 0, 12, 0) };
-        var close = CreateButton("×", surface, muted, surface);
-        close.FontSize = 20;
-        close.Width = 34;
-        close.Padding = new Thickness(0);
-        close.VerticalAlignment = VerticalAlignment.Center;
-        close.ToolTip = Text("关闭", "Close");
-        AutomationProperties.SetName(close, (string)close.ToolTip);
-        WindowChrome.SetIsHitTestVisibleInChrome(close, true);
-        close.Click += (_, _) => Close();
+        var close = DeskWindowChrome.Controls(this, dark, closeOnly: true);
         DockPanel.SetDock(close, Dock.Right);
         header.Children.Add(close);
         var check = new TextBlock

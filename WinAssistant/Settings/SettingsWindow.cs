@@ -292,9 +292,7 @@ internal sealed partial class SettingsWindow : Window
             VerticalAlignment = VerticalAlignment.Stretch
         };
         commands.Children.Add(BuildTitleBarThemeSwitch(dark));
-        commands.Children.Add(CaptionButton("−", T("最小化", "Minimize"), dark, false, () => WindowState = WindowState.Minimized));
-        commands.Children.Add(CaptionButton(WindowState == WindowState.Maximized ? "❐" : "□", WindowState == WindowState.Maximized ? T("还原", "Restore") : T("最大化", "Maximize"), dark, false, ToggleMaximize));
-        commands.Children.Add(CaptionButton("×", T("关闭", "Close"), dark, true, Close));
+        commands.Children.Add(DeskWindowChrome.Controls(this, dark));
         WindowChrome.SetIsHitTestVisibleInChrome(commands, true);
         Grid.SetColumn(commands, 2);
         bar.Children.Add(commands);
@@ -342,43 +340,6 @@ internal sealed partial class SettingsWindow : Window
         };
         button.Click += (_, _) => audioState?.SetTheme(dark ? "Light" : "Dark");
         return button;
-    }
-
-    private Button CaptionButton(string glyph, string toolTip, bool dark, bool danger, Action action)
-    {
-        var button = new Button
-        {
-            Content = glyph,
-            ToolTip = toolTip,
-            Width = 40,
-            Height = 52,
-            MinHeight = 52,
-            Margin = new Thickness(0),
-            Padding = new Thickness(0),
-            Background = Brushes.Transparent,
-            BorderBrush = Brushes.Transparent,
-            Foreground = Foreground,
-            FontSize = glyph == "−" ? 18 : 15,
-            FontWeight = FontWeights.Medium,
-            Focusable = false
-        };
-        button.MouseEnter += (_, _) =>
-        {
-            button.Background = Brush(danger ? "#E5484D" : dark ? "#253248" : "#EAF1FC");
-            if (danger) button.Foreground = Brushes.White;
-        };
-        button.MouseLeave += (_, _) =>
-        {
-            button.Background = Brushes.Transparent;
-            button.Foreground = Foreground;
-        };
-        button.Click += (_, _) => action();
-        return button;
-    }
-
-    private void ToggleMaximize()
-    {
-        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     }
 
     private string PageName(int index) => index switch

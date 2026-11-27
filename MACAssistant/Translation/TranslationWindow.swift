@@ -47,8 +47,9 @@ final class TranslationWindowController: NSObject, ObservableObject, NSWindowDel
             newWindow.level = .floating
             newWindow.isReleasedWhenClosed = false
             newWindow.delegate = self
-            newWindow.contentView = NSHostingView(rootView: TranslationWindowView(controller: self)
+            let content = NSHostingView(rootView: TranslationWindowView(controller: self)
                 .environmentObject(SettingsManager.shared))
+            DeskWindowChrome.wrap(content, in: newWindow, title: t("录写/翻译", "Transcribe / Translate"))
             newWindow.center()
             window = newWindow
         }

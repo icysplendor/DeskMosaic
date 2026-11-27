@@ -1,3 +1,4 @@
+using WinAssistant.Infrastructure;
 using WinAssistant.Audio.UI;
 using System.Windows;
 using System.Windows.Controls;
@@ -335,7 +336,7 @@ internal sealed class TranslationWindow : Window
             if (session is null && DropFile(args.Data) is { } file) SetAudioFile(file, reselected: true);
             args.Handled = true;
         };
-        Content = root;
+        Content = DeskWindowChrome.Wrap(this, root, dark);
         SetStatus(T("就绪", "Ready"));
 
     }

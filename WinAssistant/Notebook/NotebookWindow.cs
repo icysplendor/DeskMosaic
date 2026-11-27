@@ -183,16 +183,14 @@ internal sealed class NotebookWindow : Window
             presenter.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
             root.AppendChild(presenter); template.VisualTree = root;
             var hover = new Trigger { Property = IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BackgroundProperty, help == "关闭笔记窗口" ? Brushes.Firebrick : line, "captionBackground"));
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, line, "captionBackground"));
             template.Triggers.Add(hover);
             ButtonFeedback.Apply(template, "captionBackground");
             button.Template = template;
             button.Click += (_, _) => action(); commands.Children.Add(button);
         }
         Add("◐", "切换主题", () => { if (ready) _ = browser.ExecuteScriptAsync("document.getElementById('theme').click()"); });
-        Add("−", "最小化", () => WindowState = WindowState.Minimized);
-        Add("□", "最大化或还原", () => WindowAction("maximize"));
-        Add("×", "关闭笔记窗口", Close);
+        commands.Children.Add(DeskWindowChrome.Controls(this, dark));
         DockPanel.SetDock(commands, Dock.Right); bar.Children.Add(commands);
         var identity = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var headerIcon = new Image { Source = ApplicationImages.HeaderIcon, Width = 24, Height = 24,

@@ -1,3 +1,4 @@
+using WinAssistant.Infrastructure;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Windows;
@@ -14,6 +15,7 @@ internal sealed class NotebookCodeWindow : Window
 {
     private const string EditorUrl = "https://notebook.local/code-editor.html";
     private readonly WebView2 browser = new();
+    private readonly System.Windows.Controls.DockPanel shell;
     private JsonElement? initial;
     private readonly CoreWebView2Environment environment;
     private object? result;
@@ -27,7 +29,8 @@ internal sealed class NotebookCodeWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         this.environment = environment;
         Background = owner.Background;
-        Content = browser;
+        shell = DeskWindowChrome.Wrap(this, browser, dark: false);
+        Content = shell;
         Loaded += Initialize;
         Closing += ConfirmClose;
         Closed += (_, _) => { closed = true; browser.Dispose(); completion.TrySetResult(result); };
@@ -53,7 +56,8 @@ internal sealed class NotebookCodeWindow : Window
         if (closed || initial is not null) throw new InvalidOperationException("代码编辑窗口不可用");
         initial = args.Clone();
         var dark = args.GetProperty("dark").GetBoolean();
-        Background = new SolidColorBrush(dark ? Color.FromRgb(17, 27, 43) : Color.FromRgb(248, 251, 255));
+        Background = new SolidColorBrush(dark ? Color.FromRgb(17, 27, 43) : Colors.White);
+        DeskWindowChrome.SetHeader(shell, this, dark);
         if (warming)
         {
             warming = false;

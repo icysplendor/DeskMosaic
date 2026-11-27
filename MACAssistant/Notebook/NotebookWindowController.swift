@@ -24,7 +24,7 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         // AppKit owns native resize edges outside WKWebView. Windows reserves
         // an inner 10-DIP hit region because WebView2's child HWND intercepts it.
         let window = NSWindow(contentRect: web.frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "笔记本"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        window.title = "笔记本"; DeskWindowChrome.configure(window)
         window.isReleasedWhenClosed = false; window.minSize = NSSize(width: 900, height: 600)
         let content = NSView(frame: web.frame)
         let header = NotebookTitlebar(frame: NSRect(x: 0, y: 822, width: 1280, height: 38))
@@ -32,15 +32,16 @@ final class NotebookWindowController: NSObject, WKScriptMessageHandler, WKNaviga
         web.frame = NSRect(x: 0, y: 0, width: 1280, height: 822)
         web.autoresizingMask = [.width, .height]
         content.addSubview(web); content.addSubview(header)
-        let icon = NSImageView(frame: NSRect(x: 84, y: 7, width: 24, height: 24))
+        let icon = NSImageView(frame: NSRect(x: 14, y: 7, width: 24, height: 24))
         icon.image = NSImage(named: "AppEmblem"); header.addSubview(icon)
         let title = NSTextField(labelWithString: "笔记本")
-        title.frame = NSRect(x: 117, y: 8, width: 200, height: 22)
+        title.frame = NSRect(x: 47, y: 8, width: 200, height: 22)
         title.font = .systemFont(ofSize: 14, weight: .semibold); header.addSubview(title)
         let theme = NSButton(title: "◐", target: self, action: #selector(toggleTheme))
-        theme.frame = NSRect(x: 1228, y: 3, width: 36, height: 32)
+        theme.frame = NSRect(x: 1114, y: 3, width: 36, height: 32)
         theme.autoresizingMask = [.minXMargin]; theme.bezelStyle = .texturedRounded
         theme.toolTip = "切换浅色或深色"; header.addSubview(theme)
+        DeskWindowChrome.addControls(to: header)
         window.contentView = content; window.delegate = self; window.center()
         window.isMovableByWindowBackground = false
         self.window = window; browser = web
@@ -231,7 +232,7 @@ private final class NotebookCodeWindow: NSObject, NSWindowDelegate, WKScriptMess
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         browser = NotebookWebView(frame: NSRect(x: 0, y: 0, width: 1100, height: 760), configuration: configuration)
         browser.navigationDelegate = self
-        window.contentView = browser; window.center()
+        DeskWindowChrome.wrap(browser, in: window, title: window.title); window.center()
         if let resources = Bundle.main.url(forResource: "NotebookWeb", withExtension: nil) {
             let url = resources.appendingPathComponent("code-editor.html")
             editorURL = url.standardizedFileURL
@@ -284,7 +285,7 @@ private final class NotebookCodeWindow: NSObject, NSWindowDelegate, WKScriptMess
 
 // Dragging stays in AppKit: an asynchronous WebKit message cannot retain the mouse event.
 @MainActor
-private final class NotebookTitlebar: NSView {
+final class NotebookTitlebar: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 { window?.zoom(nil) }
